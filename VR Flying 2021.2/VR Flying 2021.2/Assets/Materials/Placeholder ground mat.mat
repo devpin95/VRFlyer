@@ -1,0 +1,66 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!21 &2100000
+Material:
+  serializedVersion: 6
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_Name: Placeholder ground mat
+  m_Shader: {fileID: 4800000, guid: be80f1ecbecd7af429b415dc8be2efe6, type: 3}
+  m_ShaderKeywords: 
+  m_LightmapFlags: 4
+  m_EnableInstancingVariants: 0
+  m_DoubleSidedGI: 0
+  m_CustomRenderQueue: -1
+  stringTagMap: {}
+  disabledShaderPasses: []
+  m_SavedProperties:
+    serializedVersion: 3
+    m_TexEnvs:
+    - _AntiTilingTexture:
+        m_Texture: {fileID: 2800000, guid: 23105c23adb6fb44798d1285e473f881, type: 3}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _Grass1:
+        m_Texture: {fileID: 2800000, guid: 7b4b44557efd3ef4190530e2e45001bf, type: 3}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _Grass1normal:
+        m_Texture: {fileID: 2800000, guid: 52979744929b5af42a3f726bd4dc72b2, type: 3}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _Rock:
+        m_Texture: {fileID: 2800000, guid: da8cece31ebe275419c6fe089590f85b, type: 3}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _Texture0:
+        m_Texture: {fileID: 2800000, guid: 7b4b44557efd3ef4190530e2e45001bf, type: 3}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _Texture1:
+        m_Texture: {fileID: 2800000, guid: 52979744929b5af42a3f726bd4dc72b2, type: 3}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _texcoord:
+        m_Texture: {fileID: 0}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    m_Ints: []
+    m_Floats:
+    - _AntiTiling1: 0
+    - _AntiTiling2: 3.6
+    - _AntiTiling3: 6
+    - _Float0: 4.88
+    - _Float1: 1
+    - _Grass1tile: 1
+    - _Grass1tile1: 0.5
+    - _GrassNormalScale: 0
+    - _Rock1tile: 11.1
+    - _SlopeMax: -2
+    - _SlopeMin: 2.05
+    - __dirty: 0
+    m_Colors:
+    - _Vector1: {r: 0, g: 1, b: 0, a: 0}
+  m_BuildTextureStacks: []

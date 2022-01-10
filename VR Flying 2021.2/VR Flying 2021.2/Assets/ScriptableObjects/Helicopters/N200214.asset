@@ -1,0 +1,35 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 647a0ada65e5c4a4a92ec8b9f71f84ab, type: 3}
+  m_Name: N200214
+  m_EditorClassIdentifier: 
+  helicopterPrefab: {fileID: 1563068533186256716, guid: 294d9da7fdaf03347b835afafdd2b3f1, type: 3}
+  rotation: {x: -90, y: 0, z: 0}
+  offset: {x: -0.423, y: 0, z: 0}
+  scale: {x: 1, y: 1, z: 1}
+  boxColliderCenter: {x: 0.7276728, y: -0.041704178, z: -0.6078496}
+  boxColliderSize: {x: 3.0736008, y: 3.6208572, z: 10.605699}
+  upwardLift: 900
+  hoverLift: 980
+  maxVelocity: 45
+  mass: 100
+  ascendPower: 500
+  descendPower: -500
+  rotationPower: 30
+  tiltPower: 20
+  rollPower: 20
+  fuelCapacity: 0
+  defaultFuelUsage: 0
+  stressedFuelUsage: 0
+  hasPrecisionMode: 0
+  precisionModeCoefficient: 0.5
+  hasAltitudeControl: 0
