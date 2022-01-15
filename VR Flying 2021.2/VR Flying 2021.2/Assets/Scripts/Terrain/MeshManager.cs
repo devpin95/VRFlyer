@@ -36,9 +36,11 @@ public class MeshManager : MonoBehaviour
     private MeshCollider _meshCollider;
 
     private TerrainMap _terrainMap = new TerrainMap();
-    [HideInInspector] public Texture2D heightMapTex;
-    [HideInInspector] public Texture2D altitudeMapTex;
+    public Texture2D heightMapTex;
+    public Texture2D altitudeMapTex;
     [HideInInspector] public Texture2D normalMapTex;
+
+    private Material _terrainMaterial;
     
     [Header("DEBUG")] 
     public Image img;
@@ -46,9 +48,7 @@ public class MeshManager : MonoBehaviour
     // Start is called before the first frame update
     void Start()
     {
-        // int minSampleRange = (int)gridOffset.x * 5;
-        // int maxSampleRange = (int)gridOffset.y * 5;
-        // Debug.Log(transform.gameObject.name + " Offset: " + gridOffset + " -> x(" + minSampleRange + ", " + (minSampleRange + 5) + ") z("  + maxSampleRange + ", " + (maxSampleRange + 5) + ")");
+        _terrainMaterial = GetComponent<MeshRenderer>().material;
         BuildTerrain();
     }
 
@@ -63,6 +63,9 @@ public class MeshManager : MonoBehaviour
         heightMapTex = _terrainMap.GetHeightMapTexture2D();
         altitudeMapTex = _terrainMap.GetAltitudeMap(altitudeVal, TerrainMap.ALTITUDE_BELOW);
         normalMapTex = _terrainMap.GetNormalMapTex2D(remapMin, remapMax);
+        
+        // _terrainMaterial.SetTexture("_HeightMap", heightMapTex);
+        // _terrainMaterial.SetTexture("_AltitudeMap", altitudeMapTex);
 
         CreateVerts();
         CreateTris();
@@ -76,8 +79,11 @@ public class MeshManager : MonoBehaviour
         _mesh.RecalculateNormals();
         
         GetComponent<MeshFilter>().sharedMesh = _mesh;
-
-        transform.position = new Vector3(gridOffset.x * meshSquares * vertexScale, 0, gridOffset.y * meshSquares * vertexScale);
+        GetComponent<MeshCollider>().sharedMesh = _mesh;
+        
+        float fullwidth = meshSquares * vertexScale; // the full width to move the block to it's correct position
+        float halfwidth = meshSquares * vertexScale / 2; // the half width to move the center of the block to the grid position
+        transform.position = new Vector3(gridOffset.x * fullwidth - halfwidth, 0, gridOffset.y * fullwidth - halfwidth);
     }
     
     private void CreateVerts()

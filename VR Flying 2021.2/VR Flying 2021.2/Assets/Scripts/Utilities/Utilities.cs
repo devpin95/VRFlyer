@@ -24,11 +24,11 @@ public static class Utilities
     {
         List<T> flatlist = new List<T>();
         
-        for ( int y = 0; y < height; ++y )
+        for ( int x = 0; x < height; ++x )
         {
-            for (int x = 0; x < width; ++x)
+            for (int y = 0; y < width; ++y)
             {
-                flatlist.Add(grid[y, x]);
+                flatlist.Add(grid[x, y]);
             }
         }
 

@@ -2,7 +2,9 @@ fileFormatVersion: 2
 guid: be80f1ecbecd7af429b415dc8be2efe6
 ShaderImporter:
   externalObjects: {}
-  defaultTextures: []
+  defaultTextures:
+  - _Rock: {fileID: 2800000, guid: da8cece31ebe275419c6fe089590f85b, type: 3}
+  - _Grass1: {fileID: 2800000, guid: 7b4b44557efd3ef4190530e2e45001bf, type: 3}
   nonModifiableTextures: []
   preprocessorOverride: 0
   userData: 

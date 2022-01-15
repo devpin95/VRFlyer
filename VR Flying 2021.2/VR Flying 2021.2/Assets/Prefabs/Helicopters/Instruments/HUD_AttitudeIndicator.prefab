@@ -550,6 +550,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: b32f2e738352df244930ce3694187684, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  instrumentInputs: {fileID: 11400000, guid: 4c1a0f8109464fa47abf5687d539ef5d, type: 2}
   helicopterTransform: {fileID: 0}
   pitchRect: {fileID: 4857298066114661130}
   bankRect: {fileID: 4857298065937615186}

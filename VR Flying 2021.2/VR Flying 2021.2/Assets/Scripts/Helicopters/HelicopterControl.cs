@@ -10,12 +10,16 @@ using InputDevice = UnityEngine.XR.InputDevice;
 public class HelicopterControl : MonoBehaviour
 {
     public HelicopterAttributes helicopterAttributes;
+    public InstrumentInput heliInstrumentInput;
 
     public GameObject XRRig;
 
-    private GameObject prefabInstance;
+    public Camera remoteCamera;
+
+    private GameObject heliPrefabInstance;
     private Transform prefabForceMoment;
     private Transform prefabXRRigAnchor;
+    private Transform prefabRemoteCameraAnchor;
     
     private Quaternion _lastRotation;
     private Vector3 _rotationVelocity;
@@ -66,21 +70,28 @@ public class HelicopterControl : MonoBehaviour
         }
 
         // instantiate and set the position/rotation of the helicopter prefab
-        prefabInstance = Instantiate(original: helicopterAttributes.helicopterPrefab, parent: transform);
-        prefabInstance.transform.SetParent(transform);
-        prefabInstance.transform.localPosition = helicopterAttributes.offset;
-        prefabInstance.transform.localEulerAngles = helicopterAttributes.rotation;
+        heliPrefabInstance = Instantiate(original: helicopterAttributes.helicopterPrefab, parent: transform);
+        heliPrefabInstance.transform.SetParent(transform);
+        heliPrefabInstance.transform.localPosition = helicopterAttributes.offset;
+        heliPrefabInstance.transform.localEulerAngles = helicopterAttributes.rotation;
 
-        prefabInstance.transform.Find("UI").GetComponent<HelicopterHUDController>().heliTransform = transform;
-        prefabInstance.transform.Find("UI").GetComponent<HelicopterHUDController>().heliRigidBody = _rb;
+        // set some of the debug UI elements
+        heliPrefabInstance.transform.Find("UI").GetComponent<HelicopterHUDController>().heliTransform = transform;
+        heliPrefabInstance.transform.Find("UI").GetComponent<HelicopterHUDController>().heliRigidBody = _rb;
+        
+        // set instrument inputs for indicators to access
+        heliInstrumentInput.HeliTransform = transform;
 
         // find the xrrig anchor point and the transform for applying forces
-        prefabXRRigAnchor = prefabInstance.transform.Find("XRRig Anchor");
-        prefabForceMoment = prefabInstance.transform.Find("Force Moment");
+        prefabXRRigAnchor = heliPrefabInstance.transform.Find("XRRig Anchor");
+        prefabRemoteCameraAnchor = heliPrefabInstance.transform.Find("Remote Camera Anchor");
+        prefabForceMoment = heliPrefabInstance.transform.Find("Force Moment");
 
         XRRig.transform.SetParent(prefabXRRigAnchor);
         XRRig.transform.position = prefabXRRigAnchor.position;
         XRRig.transform.rotation = prefabXRRigAnchor.rotation;
+        remoteCamera.transform.position = prefabRemoteCameraAnchor.position;
+        remoteCamera.transform.rotation = prefabRemoteCameraAnchor.rotation;
         
         // set the rigid body and box collider values
         _rb.mass = helicopterAttributes.mass;
