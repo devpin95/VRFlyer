@@ -6,6 +6,7 @@ using UnityEngine;
 using UnityEditor;
 using UnityEngine.Serialization;
 using UnityEngine.UI;
+using Random = UnityEngine.Random;
 
 public class MeshManager : MonoBehaviour
 {
@@ -19,9 +20,10 @@ public class MeshManager : MonoBehaviour
     public int meshSquares = 254;
     public int meshVerts = 255;
     public Vector2 gridOffset;
-    public float offsetScale = 5;
+    public Vector2 worldOffset;
+    [FormerlySerializedAs("offsetScale")] public float chunkSize = 5;
     public float vertexScale = 1;
-    public float yOffset = 0;
+    public AnimationCurve terrainCurve;
     
     [Header("Terrain")]
     public int noiseOctaves = 5;
@@ -41,6 +43,11 @@ public class MeshManager : MonoBehaviour
     [HideInInspector] public Texture2D normalMapTex;
 
     private Material _terrainMaterial;
+    private GameData _gameData;
+    
+    private Vector3 repositionOffset = Vector3.zero;
+
+    private Queue<TerrainMap.MapGenerationData> _threadResultQueue;
     
     [Header("DEBUG")] 
     public Image img;
@@ -49,27 +56,58 @@ public class MeshManager : MonoBehaviour
     void Start()
     {
         _terrainMaterial = GetComponent<MeshRenderer>().material;
+        _gameData = GameObject.Find("Game Manager").GetComponent<GameManager>().gameData;
+
+        _threadResultQueue = new Queue<TerrainMap.MapGenerationData>();
+
+        // while (true)
+        // {
+        //     if (_gameData.DataReady) break;
+        // }
+        
         BuildTerrain();
+    }
+
+    private void Update()
+    {
+        // check if there is a map generation result in the queue
+        if (_threadResultQueue.Count > 0)
+        {
+            // if there is, dequeue the data and invoke it's callback with the data
+            TerrainMap.MapGenerationData data = _threadResultQueue.Dequeue();
+            data.callback(data);
+        }
     }
 
     private void BuildTerrain()
     {
         _mesh = new Mesh();
-        
+
+        _terrainMap = new TerrainMap();
         _terrainMap.InitMap(meshVerts);
         
-        _terrainMap.GenerateMap(gridOffset, offsetScale, octaves: noiseOctaves);
+        Vector2 nworldOffset = new Vector2(gridOffset.x, gridOffset.y);
+
+        if (_gameData)
+            nworldOffset = new Vector2(gridOffset.x + _gameData.PerlinOffset.x, gridOffset.y + _gameData.PerlinOffset.y);
         
+        _terrainMap.RequestMap(nworldOffset, chunkSize, callback: MapGenerationReceived, _threadResultQueue, octaves: noiseOctaves);
+        
+        // _terrainMap.GenerateMap(nworldOffset, chunkSize, remapMin, remapMax, noiseOctaves);
+        // TerrainMap.MapGenerationData fakeData = new TerrainMap.MapGenerationData();
+        // fakeData.map = _terrainMap.Get2DHeightMap();
+        // MapGenerationReceived(fakeData);
+    }
+
+    private void MapGenerationReceived(TerrainMap.MapGenerationData data)
+    {
+        _terrainMap.SetMap(data.map, data.min, data.max);
         heightMapTex = _terrainMap.GetHeightMapTexture2D();
         altitudeMapTex = _terrainMap.GetAltitudeMap(altitudeVal, TerrainMap.ALTITUDE_BELOW);
         normalMapTex = _terrainMap.GetNormalMapTex2D(remapMin, remapMax);
-        
-        // _terrainMaterial.SetTexture("_HeightMap", heightMapTex);
-        // _terrainMaterial.SetTexture("_AltitudeMap", altitudeMapTex);
 
         CreateVerts();
         CreateTris();
-        // CreateNormals();
         CreateUVs();
 
         _mesh.vertices = _vertices;
@@ -80,15 +118,41 @@ public class MeshManager : MonoBehaviour
         
         GetComponent<MeshFilter>().sharedMesh = _mesh;
         GetComponent<MeshCollider>().sharedMesh = _mesh;
-        
+
         float fullwidth = meshSquares * vertexScale; // the full width to move the block to it's correct position
-        float halfwidth = meshSquares * vertexScale / 2; // the half width to move the center of the block to the grid position
-        transform.position = new Vector3(gridOffset.x * fullwidth - halfwidth, 0, gridOffset.y * fullwidth - halfwidth);
+        transform.position = new Vector3(gridOffset.x * fullwidth, 0, gridOffset.y * fullwidth);
+        
+        BuildStructures();
+    }
+
+    private void BuildStructures()
+    {
+        float fullwidth = meshSquares * vertexScale;
+        
+        int numStructures = Random.Range(0, Random.Range(0, 10));
+        
+        Debug.Log(transform.name + " generating " + numStructures + " structures");
+
+        for (int i = 0; i < numStructures; ++i)
+        {
+            GameObject prefab = _gameData.structureList[Random.Range(0, _gameData.structureList.Count)];
+            GameObject structure = Instantiate(prefab, transform);
+            structure.transform.SetParent(transform); // make sure that the terrain is the structures parent
+            structure.transform.localPosition = Vector3.zero;
+
+            // set a random position for the structure
+            float randx = Random.Range(0, fullwidth);
+            float randz = Random.Range(0, fullwidth);
+            Vector3 structurePos = new Vector3(randx, 5000, randz);
+            structure.transform.localPosition = structurePos;
+            
+            structure.GetComponent<Structure>().PlantStructure();
+        }
     }
     
     private void CreateVerts()
     {
-        _vertices = _terrainMap.GetRemappedFlattenedVector3VertMap(vertScale: vertexScale, min: remapMin, max: remapMax);
+        _vertices = _terrainMap.GetRemappedFlattenedVectorMap(vertScale: vertexScale, min: remapMin, max: remapMax, curve: terrainCurve);
         // _vertices[0] = new Vector3(_vertices[0].x, remapMax, _vertices[0].z);
     }
     
@@ -137,6 +201,12 @@ public class MeshManager : MonoBehaviour
 
     public void Reposition(Vector3 offset)
     {
+        repositionOffset += offset;
+        transform.position += offset;
+    }
+
+    private void ManualReposition(Vector3 offset)
+    {
         transform.position += offset;
     }
 
@@ -144,6 +214,13 @@ public class MeshManager : MonoBehaviour
     {
         Debug.Log("Building terrain");
         BuildTerrain();
+    }
+
+    public void SetGridPosition(Vector2 pos)
+    {
+        gridOffset = pos;
+        BuildTerrain();
+        ManualReposition(repositionOffset);
     }
 }
 

@@ -1,12 +1,18 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Threading;
+using System.Xml.Schema;
+using Unity.VisualScripting;
 using UnityEngine;
+using UnityEngine.Rendering.PostProcessing;
 
 public class TerrainMap
 {
     public static bool ALTITUDE_BELOW(float rhs, float lhs) { return rhs <= lhs; }
     public static bool ALTITUDE_ABOVE(float rhs, float lhs) { return rhs >= lhs; }
+    
+    public static AnimationCurve defaultHeightCurve = AnimationCurve.Constant(0, 1, 1f);
     
     private const float NeighborWeight = 0.15f;
     private const float DiagonalWeight = 0.1f;
@@ -34,11 +40,50 @@ public class TerrainMap
         mapverts = dim;
         mapsquares = dim - 1;
         heightmap = new float[dim, dim];
+        
+        maxy = float.MinValue;
+        miny = float.MaxValue;
     }
 
-    public float[,] GenerateMap(Vector2 offset, float scale, int octaves = 5)
+    public void SetMap(float[,] map, float min, float max)
+    {
+        if (map.GetLength(0) != mapverts)
+        {
+            Debug.LogError("Map does not match the dimensions of the current object");
+            return;
+        }
+        
+        heightmap = map;
+        maxy = max;
+        miny = min;
+    }
+    
+    public void RequestMap(Vector2 offset, float chunkSize, Action<MapGenerationData> callback, Queue<MapGenerationData> queue, int octaves = 5)
+    {
+        // this function will package map generation info together into an object that will be stored in an object
+        // with a function to be run in a thread. The result of the thread will be send to the callback action passed
+        // in to this function
+        
+        
+        // package the generation info together and make a new threaded terrain map object to hold that info
+        MapGenerationInfo mapGenerationData = new MapGenerationInfo(mapverts, mapsquares, offset, chunkSize, octaves);
+        
+        // set up the thread data with the generation info, the callback to put on the queue, and the queue itself
+        TerrainMapThreaded tmt = new TerrainMapThreaded(mapGenerationData, callback, queue);
+
+        // make a delegate that will call the threaded terrain map function
+        ThreadStart threadStart = delegate { tmt.ThreadProc(); };
+
+        // make a new thread and call it to start the threaded terrain generation in the TerrainMapThreaded class
+        Thread thread = new Thread(threadStart);
+        thread.Start();
+    }
+
+    public float[,] GenerateMap(Vector2 offset, float chunkSize, float min, float max, int octaves = 5)
     {
         GenerateOctaveParams(octaves);
+        
+        Debug.Log("Octave data for this thread: Amplitudes[" + Utilities.ArrayToString(_noiseAmplitudes) + "], Frequencies[" + Utilities.ArrayToString(_noiseFrequencies) + "], " + _maxSampleValue);
         
         // init the min and max values so we can remap later
         maxy = float.MinValue;
@@ -47,25 +92,13 @@ public class TerrainMap
         // convert these to ints now so we dont have to do it every loop
         int xoffset = (int) offset.x;
         int zoffset = (int) offset.y;
-
-        float l1 = xoffset * scale;
-        float l2 = l1 + scale;
-        float r1 = zoffset * scale;
-        float r2 = r1 + scale;
         
-        float l11 = Utilities.Remap(0, 0, mapverts, l1, l2);
-        float l12 = Utilities.Remap(mapverts, 0, mapverts, l1, l2);
-        float r11 = Utilities.Remap(0, 0, mapverts, r1, r2);
-        float r12 = Utilities.Remap(mapverts, 0, mapverts, r1, r2);
-
-        // Debug.Log("Offset: x(" + l1 + "=" + l11 + "," + l2 + "=" + l12 + ") z(" + r1 + "=" + r11 + "," + r2 + "=" + r12 + ")");
-
         // create vertices
         for (int x = 0; x < mapverts; ++x)
         {
             for (int z = 0; z < mapverts; ++z)
             {
-                float y = SampleOctavePerlinNoise(x, z, xoffset, zoffset, scale);
+                float y = SampleOctavePerlinNoise(x, z, xoffset, zoffset, chunkSize);
 
                 if (y < miny) miny = y;
                 if (y > maxy) maxy = y;
@@ -74,35 +107,16 @@ public class TerrainMap
             }
         }
         
-        Debug.Log("Min: " + miny + " Max: " + maxy);
+        // Debug.Log("Min: " + miny + " Max: " + maxy);
 
         // !!!!!!!
         // We can't actually do the stretching here since we are generating blocks independently. Doing it here
         // means that each block is getting stretched by it's own local min and max value and will make the edges
         // between each block not match
         // !!!!!!!
-        
-        // Debug.Log("Min: " + miny);
-        // Debug.Log("Max: " + maxy);
-        
-        // float nmaxy = float.MinValue;
-        // float nminy = float.MaxValue;
-        //
-        // // remap the values [miny, maxy] -> [0,1]
-        // for (int x = 0; x < mapverts; ++x)
-        // {
-        //     for (int z = 0; z < mapverts; ++z)
-        //     {
-        //         heightmap[x, z] = Utilities.Remap(heightmap[x, z], miny, maxy, 0, 1);
-        //         
-        //         if (heightmap[x, z] < nminy) nminy = heightmap[x, z];
-        //         if (heightmap[x, z] > nmaxy) nmaxy = heightmap[x, z];
-        //     }
-        // }
-        
-        // Debug.Log("New Min: " + nminy);
-        // Debug.Log("New Max: " + nmaxy);
-        
+
+        // heightmap = HydraulicErosion.Simulate(heightmap, scale, min, max);
+
         return heightmap;
     }
 
@@ -151,14 +165,16 @@ public class TerrainMap
         return Utilities.Flatten2DArray(vectormap, mapverts, mapverts);
     }
     
-    public Vector3[] GetRemappedFlattenedVector3VertMap(float vertScale, float min, float max)
+    public Vector3[] GetRemappedFlattenedVectorMap(float vertScale, float min, float max, AnimationCurve curve)
     {
+        AnimationCurve animCurve = new AnimationCurve(curve.keys);
+        
         Vector3[,] vectormap = new Vector3[mapverts, mapverts];
         for (int z = 0; z < mapverts; ++z)
         {
             for (int x = 0; x < mapverts; ++x)
             {
-                float y = Utilities.Remap(heightmap[x, z], 0, 1, min, max);
+                float y = Utilities.Remap(animCurve.Evaluate(heightmap[x, z]), 0, 1, min, max);
                 vectormap[x, z] = new Vector3(x * vertScale, y, z * vertScale);
             }
         }
@@ -166,14 +182,17 @@ public class TerrainMap
         return Utilities.Flatten2DArray(vectormap, mapverts, mapverts);
     }
 
-    public Texture2D GetHeightMapTexture2D()
+    public Texture2D GetHeightMapTexture2D(AnimationCurve curve = null)
     {
+        if (curve == null) curve = defaultHeightCurve;
+        
         float[] flatmap = GetFlattenedHeightMap();
         Color[] colormap = new Color[heightmap.Length];
 
         for (int i = 0; i < flatmap.Length; ++i)
         {
-            colormap[i] = new Color(flatmap[i], flatmap[i], flatmap[i], 1);
+            float curvedValue = curve.Evaluate(flatmap[i]);
+            colormap[i] = new Color(curvedValue, curvedValue, curvedValue, 1);
         }
         
         Texture2D heightMapTex = new Texture2D(mapverts, mapverts);
@@ -240,7 +259,7 @@ public class TerrainMap
         return altitudeMapTex;
     }
     
-    public float SampleOctavePerlinNoise(int x, int z, int xoffset, int zoffset, float scale)
+    public float SampleOctavePerlinNoise(int x, int z, int xoffset, int zoffset, float chunkSize)
     {
         // PARAMETERS
         //      x (int) the position to sample in the x direction
@@ -258,11 +277,11 @@ public class TerrainMap
         
         float y = 0;
 
-        float minXSampleRange = xoffset * scale;
-        float minZSampleRange = zoffset * scale;
+        float minXSampleRange = xoffset * chunkSize;
+        float minZSampleRange = zoffset * chunkSize;
 
-        float xSamplePoint = Utilities.Remap(x, 0, mapsquares, minXSampleRange, minXSampleRange + scale);
-        float zSamplePoint = Utilities.Remap(z, 0, mapsquares, minZSampleRange, minZSampleRange + scale);
+        float xSamplePoint = Utilities.Remap(x, 0, mapsquares, minXSampleRange, minXSampleRange + chunkSize);
+        float zSamplePoint = Utilities.Remap(z, 0, mapsquares, minZSampleRange, minZSampleRange + chunkSize);
 
         for (int i = 0; i < _noiseAmplitudes.Length; ++i)
         {
@@ -421,5 +440,101 @@ public class TerrainMap
         }
         
         return normal;
+    }
+
+    public struct MapGenerationInfo
+    {
+        // this class holds the information needed to generate a 2D map of octave perlin noise
+        
+        public Vector2 offset;
+        public float chunkSize;
+        public int mapverts;
+        public int mapsquares;
+        public int octaves;
+        
+        public MapGenerationInfo(int mapverts, int mapsquares, Vector2 offset, float chunkSize, int octaves)
+        {
+            this.mapverts = mapverts;
+            this.mapsquares = mapsquares;
+            this.offset = offset;
+            this.chunkSize = chunkSize;
+            this.octaves = octaves;
+        }
+    }
+
+    public struct MapGenerationData
+    {
+        // this class holds the 2D map of octave perlin noise generated by the Noise class
+        public float[,] map;
+        public float min;
+        public float max;
+        public Action<MapGenerationData> callback;
+    }
+
+    private class TerrainMapThreaded
+    {
+        // TerrainMapThreaded will enable the generation of a 2D noise map on a thread instead of on the main Unity thread
+        // and will improve performance when a new map needs to be generated
+        private MapGenerationInfo _generationInfo;
+        private Action<MapGenerationData> _callback;
+        private Queue<MapGenerationData> _resultQ;
+
+        public TerrainMapThreaded(MapGenerationInfo info, Action<MapGenerationData> callback, Queue<MapGenerationData> q)
+        {
+            _generationInfo = info;
+            _callback = callback;
+            _resultQ = q;
+        }
+
+        public void ThreadProc()
+        {
+            // create a new object to hold the result of the map generation
+            MapGenerationData data = new MapGenerationData();
+            data.map = new float[_generationInfo.mapverts, _generationInfo.mapverts];
+            data.callback = _callback;
+            
+            // generate octave frequencies and amplitudes of doing octave noise
+            Noise.OctaveData octaveData = Noise.GenerateOctaveData(_generationInfo.octaves);
+            
+            Debug.Log("Octave data for this thread: Amplitudes[" + Utilities.ArrayToString(octaveData.Amplitudes) + "], Frequencies[" + Utilities.ArrayToString(octaveData.Frequencies) + "], " + octaveData.MAXSampleValue);
+
+            // init the min and max values so we can remap later
+            data.max = float.MinValue;
+            data.min = float.MaxValue;
+
+            // convert these to ints now so we dont have to do it every loop
+            int xoffset = (int) _generationInfo.offset.x;
+            int zoffset = (int) _generationInfo.offset.y;
+        
+            // create vertices
+            for (int x = 0; x < _generationInfo.mapverts; ++x)
+            {
+                for (int z = 0; z < _generationInfo.mapverts; ++z)
+                {
+                    float y = Noise.SampleOctavePerlinNoise(x, z, _generationInfo.mapsquares, xoffset, zoffset, _generationInfo.chunkSize, octaveData);
+
+                    if (y < data.min) data.min = y;
+                    if (y > data.max) data.max = y;
+
+                    data.map[x, z] = y;
+                }
+            }
+
+            // put the result in the locked queue so that whoever needs it can access it
+            lock (_resultQ)
+            {
+                _resultQ.Enqueue(data);   
+            }
+
+            // Debug.Log("Min: " + miny + " Max: " + maxy);
+
+            // !!!!!!!
+            // We can't actually do the stretching here since we are generating blocks independently. Doing it here
+            // means that each block is getting stretched by it's own local min and max value and will make the edges
+            // between each block not match
+            // !!!!!!!
+
+            // heightmap = HydraulicErosion.Simulate(heightmap, scale, min, max);
+        }
     }
 }

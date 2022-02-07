@@ -104,6 +104,12 @@ public class HelicopterControl : MonoBehaviour
         _lastVelocity = _rb.velocity;
     }
 
+    private void Update()
+    {
+        remoteCamera.transform.position = prefabRemoteCameraAnchor.position;
+        remoteCamera.transform.rotation = prefabRemoteCameraAnchor.rotation;
+    }
+
     // Update is called once per frame
     void FixedUpdate()
     {
@@ -251,5 +257,7 @@ public class HelicopterControl : MonoBehaviour
     public void Reposition(Vector3 v3)
     {
         transform.position += v3;
+        remoteCamera.transform.position = prefabRemoteCameraAnchor.position;
+        remoteCamera.transform.rotation = prefabRemoteCameraAnchor.rotation;
     }
 }

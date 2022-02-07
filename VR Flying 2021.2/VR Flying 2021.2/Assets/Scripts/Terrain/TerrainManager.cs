@@ -12,13 +12,13 @@ public class TerrainManager : MonoBehaviour
     public int meshVerts = 255;
     public float offsetScale = 5;
     public float vertexScale = 1;
+    public AnimationCurve terrainCurve;
     
     [Header("Terrain")]
     public int noiseOctaves = 5;
     public float remapMin = -500;
     public float remapMax = 500;
-    public float yOffset = 0;
-    
+
     // Start is called before the first frame update
     void Start()
     {
@@ -38,11 +38,11 @@ public class TerrainManager : MonoBehaviour
             mesh.meshVerts = meshVerts;
             mesh.meshSquares = meshVerts - 1;
             mesh.vertexScale = vertexScale;
-            mesh.offsetScale = offsetScale;
+            mesh.chunkSize = offsetScale;
             mesh.noiseOctaves = noiseOctaves;
             mesh.remapMin = remapMin;
             mesh.remapMax = remapMax;
-            mesh.yOffset = yOffset;
+            mesh.terrainCurve = terrainCurve;
             mesh.ButtonTest();
         }
 

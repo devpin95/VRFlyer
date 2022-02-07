@@ -39,4 +39,17 @@ public static class Utilities
     {
         return Sprite.Create(tex, new Rect(0, 0, tex.width, tex.height), new Vector2(0.5f, 0.5f), 100.0f);
     }
+
+    public static string ArrayToString<T>(T[] array)
+    {
+        string res = "";
+
+        for (int i = 0; i < array.Length; ++i)
+        {
+            if (i == array.Length - 1) res += array[i].ToString();
+            else res += array[i].ToString() + ", ";
+        }
+        
+        return res;
+    }
 }

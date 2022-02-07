@@ -14,6 +14,7 @@ public class FlatUIController : MonoBehaviour
     // Start is called before the first frame update
     void Start()
     {
+        if (removeCameraRenderTexture == null) return;
         removeCameraRenderTexture.width = Screen.currentResolution.width;
         removeCameraRenderTexture.height = Screen.currentResolution.height;
     }

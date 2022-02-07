@@ -1,7 +1,9 @@
+using System;
 using System.Collections;
 using System.Collections.Generic;
 using Unity.VisualScripting;
 using UnityEngine;
+using Random = UnityEngine.Random;
 
 public class HydraulicErosion
 {
@@ -19,13 +21,13 @@ public class HydraulicErosion
     private static class Parameters
     {
         public static float DT = 1.2f;
-        public static int DropCount = 200000;
+        public static int DropCount = 500000;
         public static float StartingVolume = 1f;
         public static float MINVolume = 0.01f;
         public static float Density = 1f;
-        public static float Friction = 0.05f;
-        public static float DepositeRate = 0.05f;
-        public static float EvaporationRate = 0.038f;
+        public static float Friction = 0.24f;
+        public static float DepositeRate = 0.208f;
+        public static float EvaporationRate = 0.183f;
         public static bool FlipXY = false;
     }
     
@@ -40,7 +42,7 @@ public class HydraulicErosion
         public float sediment = 0;
     }
 
-    public static float[,] Simulate(float[,] map)
+    public static float[,] Simulate(float[,] map, float scale, float remapMin, float remapMax)
     {
         // https://github.com/weigert/SimpleErosion/blob/master/source/include/world/world.cpp
 
@@ -79,12 +81,9 @@ public class HydraulicErosion
                 Vector2 initialPos = drop.pos;
                 Vector3 norm;
                 
-                norm = SampleBetaNormalAtXY(map, (int)initialPos.x, (int)initialPos.y);
+                norm = SampleBetaNormalAtXY(map, (int)initialPos.x, (int)initialPos.y, scale);
 
-                Vector2 forceVector;
-
-                if (Parameters.FlipXY) forceVector = new Vector2(norm.z, norm.x);
-                else forceVector = new Vector2(norm.x, norm.z);
+                Vector2 forceVector = new Vector2(norm.x, norm.z);
 
                 Vector2 F = Parameters.DT * forceVector; // force
                 float m = (drop.volume * Parameters.Density); // mass
@@ -101,11 +100,11 @@ public class HydraulicErosion
                 // apply friction
                 drop.speed *= 1f - Parameters.DT * Parameters.Friction;
 
-                if (drop.speed.magnitude > Constants.maxDropSpeed)
-                {
-                    ++maxspeedcount;
-                    drop.speed = drop.speed.normalized * Constants.maxDropSpeed * drop.volume;
-                }
+                // if (drop.speed.magnitude > Constants.maxDropSpeed)
+                // {
+                //     ++maxspeedcount;
+                //     drop.speed = drop.speed.normalized * Constants.maxDropSpeed * drop.volume;
+                // }
 
                 if (maxspeedcount > Constants.maxSpeedThreshold) break;
 
@@ -113,12 +112,26 @@ public class HydraulicErosion
 
                 // figure out sediment levels
                 // the height at our initial position
+                // float prevHeight = Utilities.Remap(map[(int) initialPos.x, (int) initialPos.y], 0, 1, remapMin, remapMax);
                 float prevHeight = map[(int) initialPos.x, (int) initialPos.y];
 
                 // the height at our current position
-                float curHeight = map[(int) initialPos.x, (int) initialPos.y];
-                
-                float travelDistance = drop.speed.magnitude * (prevHeight - curHeight);
+                float curHeight = map[(int) drop.pos.x, (int) drop.pos.y];
+                // float curHeight = 0;
+                // try
+                // {
+                //     curHeight = Utilities.Remap(map[(int) drop.pos.x, (int) drop.pos.y], 0, 1, remapMin, remapMax);
+                // }
+                // catch (IndexOutOfRangeException e)
+                // {
+                //     Debug.LogError("Out of bounds at (" + drop.pos.x.ToString("n2") + ", " + drop.pos.y.ToString("n2") + ") -- " + drop.speed.ToString());
+                //     // Console.WriteLine(e);
+                //     throw;
+                // }
+                // float curHeight = map[(int) drop.pos.x, (int) drop.pos.y];
+
+                float heightDif = Utilities.Remap(prevHeight - curHeight, 0, 1, remapMin, remapMax);
+                float travelDistance = drop.speed.magnitude * heightDif;
                 float maxsed = drop.volume * travelDistance;
 
                 if (maxsed < 0) maxsed = 0f;
@@ -129,7 +142,11 @@ public class HydraulicErosion
 
                 float amount = Parameters.DT * drop.volume * Parameters.DepositeRate * seddiff;
                 
+                // if ( amount > 0 ) Debug.Log(amount);
+                
                 map[(int)initialPos.x, (int)initialPos.y] -= amount;
+                // map[(int) initialPos.x, (int) initialPos.y] =
+                //     Mathf.Clamp01(map[(int) initialPos.x, (int) initialPos.y]);
                 // map.ChangeNode((int)initialPos.x, (int)initialPos.y, amount); // old
                 
                 // do some evaporation
@@ -142,7 +159,7 @@ public class HydraulicErosion
         return map;
     }
     
-    private static Vector3 SampleBetaNormalAtXY(float[,] map, int row, int col)
+    private static Vector3 SampleBetaNormalAtXY(float[,] map, int row, int col, float scale = 1)
     {
         int meshEdge = map.GetLength(0) - 1;
         Vector3 normal = Vector3.zero;
@@ -150,19 +167,19 @@ public class HydraulicErosion
         // direct neighbors
         // up
         if (row + 1 < meshEdge) 
-            normal += Vector3.Normalize(new Vector3(map[row, col] - map[row + 1, col], 1f, 0)) * Constants.NeighborWeight;
+            normal += Vector3.Normalize(new Vector3(scale * (map[row, col] - map[row + 1, col]), 1f, 0)) * Constants.NeighborWeight;
         
         // down
         if (row - 1 >= 0) 
-            normal += Vector3.Normalize(new Vector3(map[row - 1, col] - map[row, col], 1f, 0)) * Constants.NeighborWeight;
+            normal += Vector3.Normalize(new Vector3(scale * (map[row - 1, col] - map[row, col]), 1f, 0)) * Constants.NeighborWeight;
         
         // right
         if ( col + 1 < meshEdge ) 
-            normal += Vector3.Normalize(new Vector3(0, 1f, map[row, col] - map[row, col + 1])) * Constants.NeighborWeight;
+            normal += Vector3.Normalize(new Vector3(0, 1f, scale * (map[row, col] - map[row, col + 1]))) * Constants.NeighborWeight;
         
         // left
         if ( col - 1 >= 0 ) 
-            normal += Vector3.Normalize(new Vector3(0, 1f, map[row, col-1] - map[row, col])) * Constants.NeighborWeight;
+            normal += Vector3.Normalize(new Vector3(0, 1f, scale * (map[row, col-1] - map[row, col]))) * Constants.NeighborWeight;
         
         // diagonals
         float sqrt2 = Mathf.Sqrt(2);
@@ -170,28 +187,28 @@ public class HydraulicErosion
         // up right
         if (row + 1 < meshEdge && col + 1 < meshEdge)
         {
-            float val = map[row, col] - map[row + 1, col + 1];
+            float val = scale * (map[row, col] - map[row + 1, col + 1]);
             normal += Vector3.Normalize(new Vector3(val/sqrt2, sqrt2, val/sqrt2)) * Constants.DiagonalWeight;
         }
 
         // up left
         if (row + 1 < meshEdge && col - 1 >= 0)
         {
-            float val = map[row, col] - map[row + 1, col - 1];
+            float val = scale * (map[row, col] - map[row + 1, col - 1]);
             normal += Vector3.Normalize(new Vector3(val/sqrt2, sqrt2, val/sqrt2)) * Constants.DiagonalWeight;
         }
         
         // down right
         if (row - 1 >= 0 && col + 1 < meshEdge)
         {
-            float val = map[row, col] - map[row - 1, col + 1];
+            float val = scale * (map[row, col] - map[row - 1, col + 1]);
             normal += Vector3.Normalize(new Vector3(val/sqrt2, sqrt2, val/sqrt2)) * Constants.DiagonalWeight;
         }
         
         // down left
         if (row - 1 >= 0 && col - 1 >= 0)
         {
-            float val = map[row, col] - map[row - 1, col - 1];
+            float val = scale * (map[row, col] - map[row - 1, col - 1]);
             normal += Vector3.Normalize(new Vector3(val/sqrt2, sqrt2, val/sqrt2)) * Constants.DiagonalWeight;
         }
 
@@ -200,7 +217,7 @@ public class HydraulicErosion
 
     private static bool SampleInBounds(float[,] map, float x, float y)
     {
-        int dim = map.GetLength(0);
+        int dim = map.GetLength(0) - 1;
         
         if (x >= dim || y >= dim) return false;
         if (x < 0 || y < 0) return false;
