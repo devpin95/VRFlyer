@@ -7,8 +7,15 @@ using UnityEngine;
 public class TerrainManager : MonoBehaviour
 {
     public List<MeshManager> meshManagers;
+
+    [Header("Player")] 
+    public Transform playerTransform;
     
-    [Header("Mesh")]
+    [Tooltip("The number of grid units from the player to draw.\nReal distance = viewDistance * vertexScale * meshVerts")]
+    public float viewDistance = 1;
+    private float realViewDistance = 1;
+    
+    [Header("Mesh Settings")]
     public int meshVerts = 255;
     public float offsetScale = 5;
     public float vertexScale = 1;
@@ -22,7 +29,7 @@ public class TerrainManager : MonoBehaviour
     // Start is called before the first frame update
     void Start()
     {
-        
+        realViewDistance = viewDistance * vertexScale * meshVerts;
     }
 
     // Update is called once per frame

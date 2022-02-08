@@ -65,7 +65,7 @@ public class MeshManager : MonoBehaviour
         //     if (_gameData.DataReady) break;
         // }
         
-        BuildTerrain();
+        // BuildTerrain();
     }
 
     private void Update()
@@ -91,6 +91,8 @@ public class MeshManager : MonoBehaviour
         if (_gameData)
             nworldOffset = new Vector2(gridOffset.x + _gameData.PerlinOffset.x, gridOffset.y + _gameData.PerlinOffset.y);
         
+        worldOffset = nworldOffset;
+
         _terrainMap.RequestMap(nworldOffset, chunkSize, callback: MapGenerationReceived, _threadResultQueue, octaves: noiseOctaves);
         
         // _terrainMap.GenerateMap(nworldOffset, chunkSize, remapMin, remapMax, noiseOctaves);
