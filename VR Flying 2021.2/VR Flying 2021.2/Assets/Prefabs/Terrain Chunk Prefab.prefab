@@ -116,8 +116,8 @@ MonoBehaviour:
   meshVerts: 241
   gridOffset: {x: 1, y: -1}
   worldOffset: {x: 1, y: -1}
-  chunkSize: 10
-  vertexScale: 255
+  chunkSize: 5
+  vertexScale: 100
   terrainCurve:
     serializedVersion: 2
     m_Curve:
@@ -142,18 +142,32 @@ MonoBehaviour:
     - serializedVersion: 3
       time: 0.9958191
       value: 1.0070915
-      inSlope: 1.8335181
-      outSlope: 1.8335181
+      inSlope: -0.071555614
+      outSlope: -0.071555614
       tangentMode: 0
       weightedMode: 0
-      inWeight: 0.1143464
+      inWeight: 0.19258347
       outWeight: 0
     m_PreInfinity: 2
     m_PostInfinity: 2
     m_RotationOrder: 4
+  LOD: 6
   noiseOctaves: 5
-  remapMin: -3000
-  remapMax: 3000
+  remapMin: -1500
+  remapMax: 1500
+  recalculateLodDistance: 25
+  distanceFromPlayer: 0
+  lods:
+  - lod: 0
+    distance: 12000
+  - lod: 2
+    distance: 14000
+  - lod: 3
+    distance: 26000
+  - lod: 4
+    distance: 38000
+  - lod: 5
+    distance: 50000
   altitudeVal: 0.375
   heightMapTex: {fileID: 0}
   altitudeMapTex: {fileID: 0}

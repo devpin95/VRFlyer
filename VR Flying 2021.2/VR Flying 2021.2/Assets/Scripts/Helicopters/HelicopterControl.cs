@@ -44,20 +44,11 @@ public class HelicopterControl : MonoBehaviour
     private Vector3 _lastVelocity;
 
     private int _fixedUpdateCounter = 0;
-
-    public TextMeshProUGUI hover;
-    public TextMeshProUGUI up;
-    public TextMeshProUGUI down;
-    public TextMeshProUGUI level;
-    public Color current;
-    public Color def;
+    
     
     // Start is called before the first frame update
     void Start()
     {
-        if ( _hovering ) hover.color = Color.green;
-        else hover.color = Color.red;
-        
         _rb = GetComponent<Rigidbody>();
         _bc = GetComponent<BoxCollider>();
         
@@ -148,7 +139,6 @@ public class HelicopterControl : MonoBehaviour
 
             angle = Math.Abs(angle);
             angle = Math.Clamp(angle, 0, 45);
-            hover.text = angle.ToString("n2");
 
             float yVel = _rb.velocity.y;
             float gravityMod = _rb.mass * Math.Abs(Physics.gravity.y); // the force needed to hover

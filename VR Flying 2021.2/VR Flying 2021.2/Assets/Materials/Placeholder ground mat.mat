@@ -36,7 +36,7 @@ Material:
         m_Scale: {x: 1, y: 1}
         m_Offset: {x: 0, y: 0}
     - _Grass1:
-        m_Texture: {fileID: 2800000, guid: 7b4b44557efd3ef4190530e2e45001bf, type: 3}
+        m_Texture: {fileID: 2800000, guid: 177193e849739fd4791760a7faf7d8ad, type: 3}
         m_Scale: {x: 1, y: 1}
         m_Offset: {x: 0, y: 0}
     - _Grass1normal:
@@ -90,14 +90,16 @@ Material:
     - _HieghtMapBlend: -0.97
     - _Rock1tile: 1
     - _Rock1tile1: 1
-    - _SlopeMax: -1.39
-    - _SlopeMin: 2.88
+    - _SlopeMax: -1.24
+    - _SlopeMin: 2.12
     - _TreeAntiTiling1: 0.002
     - _TreeAntiTiling2: 0.02
     - _TreeAntiTiling3: 0.2
     - __dirty: 0
     m_Colors:
     - _AntiTilingVector: {r: 0.9, g: 0.9, b: 0.9, a: 0}
+    - _GrassAntiTiling: {r: 0.002, g: 0.02, b: 0.2, a: 0}
+    - _RockAntiTiling: {r: 0.0001, g: 0.001, b: 0.01, a: 0}
     - _Vector0: {r: 0.5, g: 0.5, b: 0, a: 0}
     - _Vector1: {r: 0, g: 1, b: 0, a: 0}
   m_BuildTextureStacks: []

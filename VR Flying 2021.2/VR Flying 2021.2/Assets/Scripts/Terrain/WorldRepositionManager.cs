@@ -10,8 +10,8 @@ public class WorldRepositionManager : MonoBehaviour
     
     public CEvent_Vector3 worldRepositionEvent;
     
-    [Header("World Position")]
-    public Vector3 worldPos = Vector3.zero;
+    [FormerlySerializedAs("worldPos")] [Header("World Position")]
+    public Vector3 playerWorldPos = Vector3.zero;
     // public Vector2 gridPos = Vector2.zero;
     // public Vector4 gridQuad = Vector4.zero;
     // public Vector4 currentGridQuad = Vector4.zero;
@@ -30,7 +30,7 @@ public class WorldRepositionManager : MonoBehaviour
     // Start is called before the first frame update
     void Start()
     {
-        worldPos = playerTransform.position;
+        playerWorldPos = playerTransform.position;
         distanceFromOrigin += Vector3.Distance(playerTransform.position, Vector3.zero);
     }
 
@@ -38,7 +38,7 @@ public class WorldRepositionManager : MonoBehaviour
     void Update()
     {
         distanceFromOrigin = Vector3.Distance(playerTransform.position, Vector3.zero);
-        worldPos = playerTransform.position + majorOffset;
+        playerWorldPos = playerTransform.position + majorOffset;
 
         bool distanceThresholdReached = Vector3.Distance(playerTransform.position, Vector3.zero) > repositionDistance;
         if (distanceThresholdReached) Reposition();
