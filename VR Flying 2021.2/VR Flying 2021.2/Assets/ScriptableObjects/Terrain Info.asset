@@ -1,0 +1,63 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 984e8fdc589ebc94cbba6c09360ced6d, type: 3}
+  m_Name: Terrain Info
+  m_EditorClassIdentifier: 
+  meshSquares: 240
+  meshVerts: 241
+  chunkSize: 5
+  vertexScale: 50
+  terrainCurve:
+    serializedVersion: 2
+    m_Curve:
+    - serializedVersion: 3
+      time: 0
+      value: 0
+      inSlope: 0
+      outSlope: 0
+      tangentMode: 0
+      weightedMode: 0
+      inWeight: 0
+      outWeight: 0
+    - serializedVersion: 3
+      time: 0.30637315
+      value: 0.029528104
+      inSlope: 0.17048085
+      outSlope: 0.17048085
+      tangentMode: 0
+      weightedMode: 0
+      inWeight: 0.5605765
+      outWeight: 0.29240966
+    - serializedVersion: 3
+      time: 0.9958191
+      value: 1.0070915
+      inSlope: -0.071555614
+      outSlope: -0.071555614
+      tangentMode: 0
+      weightedMode: 0
+      inWeight: 0.19258347
+      outWeight: 0
+    m_PreInfinity: 2
+    m_PostInfinity: 2
+    m_RotationOrder: 4
+  noiseOctaves: 5
+  remapMin: -1000
+  remapMax: 1000
+  recalculateLodDistance: 250
+  lods:
+  - lod: 0
+    distance: 6000
+  - lod: 2
+    distance: 14000
+  - lod: 4
+    distance: 26000
+  cullDistance: 38000

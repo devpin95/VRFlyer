@@ -3,6 +3,7 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Threading;
 using System.Xml.Schema;
+using Unity.Jobs;
 using Unity.VisualScripting;
 using UnityEngine;
 using UnityEngine.Rendering.PostProcessing;
@@ -71,13 +72,15 @@ public class TerrainMap
         // set up the thread data with the generation info, the callback to put on the queue, and the queue itself
         TerrainMapThreaded tmt = new TerrainMapThreaded(mapGenerationData, callback, queue);
 
-        // make a delegate that will call the threaded terrain map function
-        ThreadStart threadStart = delegate { tmt.ThreadProc(); };
+        ThreadPool.QueueUserWorkItem(delegate { tmt.ThreadProc(); });
 
-        // make a new thread and call it to start the threaded terrain generation in the TerrainMapThreaded class
-        Thread thread = new Thread(threadStart);
-        thread.Start();
-        thread.Join();
+        // // make a delegate that will call the threaded terrain map function
+        // ThreadStart threadStart = delegate { tmt.ThreadProc(); };
+        //
+        // // make a new thread and call it to start the threaded terrain generation in the TerrainMapThreaded class
+        // Thread thread = new Thread(threadStart);
+        // thread.Start();
+        // thread.Join();
     }
 
     public float[,] GenerateMap(Vector2 offset, float chunkSize, float min, float max, int octaves = 5)
@@ -554,16 +557,54 @@ public class TerrainMap
             {
                 _resultQ.Enqueue(output);   
             }
+        }
+    }
 
-            // Debug.Log("Min: " + miny + " Max: " + maxy);
+    public struct TerrainMapIJob : IJob
+    {
+        public MapGenerationInput generationInput;
+        public Action<MapGenerationOutput, bool> _callback;
+        public Queue<MapGenerationOutput> _resultQ;
+        
+        public void Execute()
+        {
+            // create a new object to hold the result of the map generation
+            MapGenerationOutput output = new MapGenerationOutput();
+            output.map = new float[generationInput.mapverts, generationInput.mapverts];
+            output.callback = _callback;
+            
+            // generate octave frequencies and amplitudes of doing octave noise
+            Noise.OctaveData octaveData = Noise.GenerateOctaveData(generationInput.octaves);
+            
+            Debug.Log("Octave data for this thread: Amplitudes[" + Utilities.ArrayToString(octaveData.Amplitudes) + "], Frequencies[" + Utilities.ArrayToString(octaveData.Frequencies) + "], " + octaveData.MAXSampleValue);
 
-            // !!!!!!!
-            // We can't actually do the stretching here since we are generating blocks independently. Doing it here
-            // means that each block is getting stretched by it's own local min and max value and will make the edges
-            // between each block not match
-            // !!!!!!!
+            // init the min and max values so we can remap later
+            output.max = float.MinValue;
+            output.min = float.MaxValue;
 
-            // heightmap = HydraulicErosion.Simulate(heightmap, scale, min, max);
+            // convert these to ints now so we dont have to do it every loop
+            int xoffset = (int) generationInput.offset.x;
+            int zoffset = (int) generationInput.offset.y;
+        
+            // create vertices
+            for (int x = 0; x < generationInput.mapverts; ++x)
+            {
+                for (int z = 0; z < generationInput.mapverts; ++z)
+                {
+                    float y = Noise.SampleOctavePerlinNoise(x, z, generationInput.mapsquares, xoffset, zoffset, generationInput.chunkSize, octaveData);
+
+                    if (y < output.min) output.min = y;
+                    if (y > output.max) output.max = y;
+
+                    output.map[x, z] = y;
+                }
+            }
+
+            // put the result in the locked queue so that whoever needs it can access it
+            lock (_resultQ)
+            {
+                _resultQ.Enqueue(output);   
+            }
         }
     }
 }

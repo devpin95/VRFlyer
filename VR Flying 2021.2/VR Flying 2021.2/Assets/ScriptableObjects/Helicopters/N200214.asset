@@ -20,7 +20,7 @@ MonoBehaviour:
   boxColliderSize: {x: 3.0736008, y: 3.6208572, z: 10.605699}
   upwardLift: 900
   hoverLift: 980
-  maxVelocity: 45
+  maxVelocity: 40
   mass: 100
   ascendPower: 500
   descendPower: -500
