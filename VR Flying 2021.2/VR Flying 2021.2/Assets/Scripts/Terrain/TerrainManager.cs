@@ -3,6 +3,8 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 using System.Runtime.CompilerServices;
+using Unity.Jobs;
+using Unity.VisualScripting;
 using UnityEditor;
 using UnityEngine;
 
@@ -45,6 +47,9 @@ public class TerrainManager : MonoBehaviour
         }
     }
 
+    private float batchTime = 0.25f;
+    private float lastBatchScheduledTime;
+
     private void Awake()
     {
         worldRepositionManager = FindObjectOfType<WorldRepositionManager>();
@@ -57,6 +62,8 @@ public class TerrainManager : MonoBehaviour
         _activeGridCoordinates = new List<GridCoordinate>();
         _activeGridChunks = new Dictionary<GridCoordinate, GameObject>();
 
+        lastBatchScheduledTime = Time.realtimeSinceStartup;
+
         // do this in start so that the player doesnt have to travel playerTravelDistanceUpdateThreshold before generating the terrain
         // actually, we can't do this in start because some of the terrain chunks will not have done their start so we will get an error
         // UpdateTerrainGrid(startup: true);
@@ -65,6 +72,15 @@ public class TerrainManager : MonoBehaviour
     // Update is called once per frame
     void Update()
     {
+        JobHandle.ScheduleBatchedJobs();
+        // float time = Time.realtimeSinceStartup;
+        //
+        // if (time - lastBatchScheduledTime > batchTime)
+        // {
+        //     lastBatchScheduledTime = time;
+        //     JobHandle.ScheduleBatchedJobs();
+        // }
+        
         if (firstUpdate)
         {
             firstUpdate = false;
@@ -186,25 +202,27 @@ public class TerrainManager : MonoBehaviour
                 _activeGridChunks.Add(coord, chunkInstance);
 
                 // set up the mesh manager before we ask it to generate the terrain
-                MeshManager meshManager = chunkInstance.GetComponent<MeshManager>();
+                AdvancedMeshManager meshManager = chunkInstance.GetComponent<AdvancedMeshManager>();
                     
                 if ( meshManager == null ) Debug.LogWarning("No object returned from pool");
                     
                 meshManager.SetRepositionOffset(totalWorldOffset); // set the reposition offset for this chunk so that it can be positioned properly
-                meshManager.SetGridPosition(new Vector2(coord.x, coord.y)); // set the grid coordinate for this chunk
+                // meshManager.SetGridPosition(new Vector2(coord.x, coord.y)); // set the grid coordinate for this chunk
                 // meshManager.EnableRenderer(); // make sure that the renderer is re-enabled if it was off
                 // meshManager.SetLod(0);
 
                 // get the chunk to start building the terrain
-                meshManager.BuildTerrain();
+                meshManager.BuildTerrain(new Vector2(coord.x, coord.y));
 
-                yield return new WaitForSeconds(1 / 60 * 5);
+                // yield return new WaitForSeconds(1 / 60 * 5);
 
                 addedItems += "[" + coord.x + ", " + coord.y + "]";
             }
         }
         
         Debug.Log("Added " + addedItems);
+
+        yield return null;
     }
 
     // receive the reposition event so that we can update mesh chunk positions that were not active when the event happened

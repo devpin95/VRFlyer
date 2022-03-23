@@ -239,13 +239,25 @@ public class MeshManager : MonoBehaviour
             reposition: !stub);
         
         yield return null;
-        
-        // make the new builder thread object with the input, the output queue, and the callback we need to invoke
-        MeshBuilderThread builderThread = new MeshBuilderThread(meshGenerationInput, _meshThreadResultQueue, MeshGenerationReceived);
-        
-        yield return null;
 
-        ThreadPool.QueueUserWorkItem(delegate { builderThread.ThreadProc(); });
+        // ** IJob **
+        // -------------------------------------------------------------------------------------------------------------
+        MeshBuilderIJob builderIJob = new MeshBuilderIJob();
+        builderIJob.meshInfo = meshGenerationInput;
+        builderIJob.callback = MeshGenerationReceived;
+        builderIJob.resultQ = _meshThreadResultQueue;
+
+        JobHandle jobHandle = builderIJob.Schedule();
+        jobHandle.Complete();
+        
+        // ** thread pool **
+        // -------------------------------------------------------------------------------------------------------------
+        // // make the new builder thread object with the input, the output queue, and the callback we need to invoke
+        // MeshBuilderThread builderThread = new MeshBuilderThread(meshGenerationInput, _meshThreadResultQueue, MeshGenerationReceived);
+        //
+        // yield return null;
+        //
+        // ThreadPool.QueueUserWorkItem(delegate { builderThread.ThreadProc(); });
 
         // // make a ThreadStart that will call the MeshBuilderThread.ThreadProc and to run the mesh generation on a thread
         // ThreadStart threadStart = delegate { builderThread.ThreadProc(); };

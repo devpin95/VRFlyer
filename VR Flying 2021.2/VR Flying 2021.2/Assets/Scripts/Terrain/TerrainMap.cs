@@ -1,12 +1,15 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Runtime.ConstrainedExecution;
 using System.Threading;
-using System.Xml.Schema;
+using Unity.Collections;
 using Unity.Jobs;
-using Unity.VisualScripting;
 using UnityEngine;
-using UnityEngine.Rendering.PostProcessing;
+using Unity.Mathematics;
+
+// https://catlikecoding.com/unity/tutorials/procedural-meshes/creating-a-mesh/
+// https://www.raywenderlich.com/7880445-unity-job-system-and-burst-compiler-getting-started
 
 public class TerrainMap
 {
@@ -17,6 +20,10 @@ public class TerrainMap
     
     private const float NeighborWeight = 0.15f;
     private const float DiagonalWeight = 0.1f;
+
+    private NativeArray<float> nativeHeightMap;
+    private NativeArray<float> nativemin;
+    private NativeArray<float> nativemax;
     
     private float[,] heightmap = null;
     private int mapverts = 256;
@@ -42,8 +49,26 @@ public class TerrainMap
         mapsquares = dim - 1;
         heightmap = new float[dim, dim];
         
+        nativeHeightMap.Dispose();
+        nativeHeightMap = new NativeArray<float>(dim * dim, Allocator.Persistent);
+        
         maxy = float.MinValue;
+        nativemax.Dispose();
+        nativemax = new NativeArray<float>(1, Allocator.Persistent);
+        nativemax[0] = float.MinValue;
+        
         miny = float.MaxValue;
+        nativemin.Dispose();
+        nativemin = new NativeArray<float>(1, Allocator.Persistent);
+        nativemin[0] = float.MinValue;
+    }
+
+    // DESTRUCTOR ------------------------------------
+    ~TerrainMap()
+    {
+        nativemin.Dispose();
+        nativemax.Dispose();
+        nativeHeightMap.Dispose();
     }
 
     public void SetMap(float[,] map, float min, float max)
@@ -68,12 +93,24 @@ public class TerrainMap
         
         // package the generation info together and make a new threaded terrain map object to hold that info
         MapGenerationInput mapGenerationData = new MapGenerationInput(mapverts, mapsquares, offset, chunkSize, octaves);
+
+        // ** IJob **
+        // -------------------------------------------------------------------------------------------------------------
+        TerrainMapIJob tmijob = new TerrainMapIJob();
         
-        // set up the thread data with the generation info, the callback to put on the queue, and the queue itself
-        TerrainMapThreaded tmt = new TerrainMapThreaded(mapGenerationData, callback, queue);
 
-        ThreadPool.QueueUserWorkItem(delegate { tmt.ThreadProc(); });
+        JobHandle jobHandle = tmijob.Schedule();
+        jobHandle.Complete();
 
+        // ** Thread pool **
+        // -------------------------------------------------------------------------------------------------------------
+        // // set up the thread data with the generation info, the callback to put on the queue, and the queue itself
+        // TerrainMapThreaded tmt = new TerrainMapThreaded(mapGenerationData, callback, queue);
+        //
+        // ThreadPool.QueueUserWorkItem(delegate { tmt.ThreadProc(); });
+
+        // ** Thread **
+        // -------------------------------------------------------------------------------------------------------------
         // // make a delegate that will call the threaded terrain map function
         // ThreadStart threadStart = delegate { tmt.ThreadProc(); };
         //
@@ -81,6 +118,11 @@ public class TerrainMap
         // Thread thread = new Thread(threadStart);
         // thread.Start();
         // thread.Join();
+    }
+
+    public void RequestMapJob(Vector2 offset, float chunkSize, int octaves = 5)
+    {
+        
     }
 
     public float[,] GenerateMap(Vector2 offset, float chunkSize, float min, float max, int octaves = 5)
@@ -562,49 +604,137 @@ public class TerrainMap
 
     public struct TerrainMapIJob : IJob
     {
-        public MapGenerationInput generationInput;
-        public Action<MapGenerationOutput, bool> _callback;
-        public Queue<MapGenerationOutput> _resultQ;
+        // public MapGenerationInput generationInput;
+        
+        // MapGenerationInput mapGenerationData = new MapGenerationInput(mapverts, mapsquares, offset, chunkSize, octaves);
+
+        private NativeArray<float> map;
+        private NativeArray<float> min;
+        private NativeArray<float> max;
+        private int mapverts;
+        private int mapsquares;
+        private int2 offset;
+        private float chunkSize;
+        private int octaves;
+
+        struct OctaveData
+        {
+            public NativeArray<float> amplitudes;
+            public NativeArray<float> frequencies;
+            public float max;
+        }
+
+        public TerrainMapIJob(NativeArray<float> map, NativeArray<float> min, NativeArray<float> max, int mapverts, Vector2 offset, float chunkSize, int octaves)
+        {
+            this.map = map;
+            this.min = min;
+            this.max = max;
+            this.mapverts = mapverts;
+            mapsquares = mapverts - 1;
+            this.offset.x = (int)offset.x;
+            this.offset.y = (int)offset.y;
+            this.chunkSize = chunkSize;
+            this.octaves = octaves;
+        }
         
         public void Execute()
         {
-            // create a new object to hold the result of the map generation
-            MapGenerationOutput output = new MapGenerationOutput();
-            output.map = new float[generationInput.mapverts, generationInput.mapverts];
-            output.callback = _callback;
-            
             // generate octave frequencies and amplitudes of doing octave noise
-            Noise.OctaveData octaveData = Noise.GenerateOctaveData(generationInput.octaves);
+            OctaveData octaveData = CalculateOctaves(octaves);
             
-            Debug.Log("Octave data for this thread: Amplitudes[" + Utilities.ArrayToString(octaveData.Amplitudes) + "], Frequencies[" + Utilities.ArrayToString(octaveData.Frequencies) + "], " + octaveData.MAXSampleValue);
+            // Debug.Log("Octave data for this thread: Amplitudes[" + Utilities.ArrayToString(octaveData.Amplitudes) + "], Frequencies[" + Utilities.ArrayToString(octaveData.Frequencies) + "], " + octaveData.MAXSampleValue);
 
             // init the min and max values so we can remap later
-            output.max = float.MinValue;
-            output.min = float.MaxValue;
+            max[0] = float.MinValue;
+            min[0] = float.MaxValue;
 
             // convert these to ints now so we dont have to do it every loop
-            int xoffset = (int) generationInput.offset.x;
-            int zoffset = (int) generationInput.offset.y;
+            int xoffset = (int) offset.x;
+            int zoffset = (int) offset.y;
         
             // create vertices
-            for (int x = 0; x < generationInput.mapverts; ++x)
+            for (int x = 0; x < mapverts; ++x)
             {
-                for (int z = 0; z < generationInput.mapverts; ++z)
+                for (int z = 0; z < mapverts; ++z)
                 {
-                    float y = Noise.SampleOctavePerlinNoise(x, z, generationInput.mapsquares, xoffset, zoffset, generationInput.chunkSize, octaveData);
+                    float y = SampleNoise(x, z, mapsquares, xoffset, zoffset, chunkSize, octaveData);
 
-                    if (y < output.min) output.min = y;
-                    if (y > output.max) output.max = y;
+                    if (y < min[0]) min[0] = y;
+                    if (y > max[0]) max[0] = y;
 
-                    output.map[x, z] = y;
+                    map[z + x * mapverts] = y;
                 }
             }
 
-            // put the result in the locked queue so that whoever needs it can access it
-            lock (_resultQ)
+            octaveData.amplitudes.Dispose();
+            octaveData.frequencies.Dispose();
+        }
+
+        private OctaveData CalculateOctaves(int octaves)
+        {
+            OctaveData octaveData = new OctaveData();
+            
+            octaveData.amplitudes = new NativeArray<float>(octaves, Allocator.Temp);
+            octaveData.frequencies = new NativeArray<float>(octaves, Allocator.Temp);
+
+            octaveData.amplitudes[0] = 1;
+            octaveData.frequencies[0] = 1;
+            octaveData.max = 1;
+        
+            for (int i = 1; i < octaves; ++i)
             {
-                _resultQ.Enqueue(output);   
+                // get the power of 2 that will be used for this octave
+                float fact = (float) Mathf.Pow(2, i);
+            
+                // set the octave amplitude and increment the max value
+                octaveData.amplitudes[i] = 1.0f / fact;
+                octaveData.max += octaveData.amplitudes[i];
+            
+                // set the octave frequency
+                octaveData.frequencies[i] = fact;
             }
+
+            return octaveData;
+        }
+
+        private float SampleNoise(int x, int z, int mapsquares, int xoffset, int zoffset, float chunkSize, OctaveData octaveData)
+        {
+            // PARAMETERS
+            //      x (int) the position to sample in the x direction
+            //      z (int) the position to sample in the z direction
+            //      xoffset (int) the offset of sample space in the x direction
+            //      zoffset (int) the offset of sample space in the z direction
+            //      scale (float) the scale of offset chunks
+            // DESCRIPTION
+            //      Samples Perlin Noise at a given (x,z) with offset (xoffset, zoffset). xoffset and zoffset are blocks
+            //      of certain size that indicate that starting and ending sample points. For example, with offset (0,0) and
+            //      scale=5, noise in both the x and z directions will be sampled at [0,5]. At offset (0, 1) and scale=5, noise
+            //      in the x direction will be sampled at [0,5] and the z direction will be sampled at [5,10]
+            // OUTPUT
+            //      the value sampled from the noise function
+
+            float y = 0;
+
+            float minXSampleRange = xoffset * chunkSize;
+            float minZSampleRange = zoffset * chunkSize;
+
+            float xSamplePoint = Utilities.Remap(x, 0, mapsquares, minXSampleRange, minXSampleRange + chunkSize);
+            float zSamplePoint = Utilities.Remap(z, 0, mapsquares, minZSampleRange, minZSampleRange + chunkSize);
+
+            for (int i = 0; i < octaveData.amplitudes.Length; ++i)
+            {
+                float perlin = Mathf.PerlinNoise(octaveData.frequencies[i] * xSamplePoint, octaveData.frequencies[i] * zSamplePoint);
+                float clamped = Mathf.Clamp01(perlin);
+                float sample = octaveData.amplitudes[i] * clamped;
+
+                y += sample;
+            }
+
+            y /= octaveData.max; // normalize the result
+
+            return y;
+
+            // return Remap(y, 0, 1, remapMin, remapMax);
         }
     }
 }

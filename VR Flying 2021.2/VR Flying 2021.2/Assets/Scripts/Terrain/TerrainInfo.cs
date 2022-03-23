@@ -12,6 +12,7 @@ public class TerrainInfo : ScriptableObject
     public float chunkSize;
     public float vertexScale;
     public AnimationCurve terrainCurve;
+    public int terrainCurveSampleSize = 255;
 
     [Header("Terrain")] 
     public int noiseOctaves;

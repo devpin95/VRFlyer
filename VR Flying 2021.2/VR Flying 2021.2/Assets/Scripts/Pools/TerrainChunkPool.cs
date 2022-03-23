@@ -28,9 +28,9 @@ public class TerrainChunkPool : MonoBehaviour
             for (int i = 0; i < poolSize; ++i)
             {
                 GameObject chunk = Instantiate(terrainChunkPrefab, parent:transform);
-                chunk.SetActive(false);
                 chunk.name = "Terrain Chunk Prefab (" + id + ")";
                 chunks.Add(chunk);
+                chunk.SetActive(false);
 
                 ++id;
             }
