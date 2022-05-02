@@ -123,6 +123,8 @@ MonoBehaviour:
   heightMapTex: {fileID: 0}
   altitudeMapTex: {fileID: 0}
   normalMapTex: {fileID: 0}
+  initialGenerationEvent: {fileID: 11400000, guid: 97561b8cdef22ed4cac21b77165ade56, type: 2}
+  helipadSpawnPointNotification: {fileID: 11400000, guid: c1be19fad368f104b88fc045b67bbc76, type: 2}
   img: {fileID: 0}
 --- !u!114 &3236955378112800279
 MonoBehaviour:

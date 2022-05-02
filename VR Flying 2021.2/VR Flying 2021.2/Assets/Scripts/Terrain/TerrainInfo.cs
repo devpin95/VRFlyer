@@ -6,6 +6,9 @@ using UnityEngine;
 [CreateAssetMenu(menuName = "Terrain Obj")]
 public class TerrainInfo : ScriptableObject
 {
+    [Header("World Info")] 
+    public float baseAltitude = 1000;
+    
     [Header("Mesh")] 
     public int meshSquares;
     public int meshVerts;
@@ -23,6 +26,7 @@ public class TerrainInfo : ScriptableObject
     [Header("Detail Levels (LODS)")]
     public List<LODInfo> lods = new List<LODInfo>();
     public float cullDistance;
+    public float heightCullDistance = 1000;
     
     [Serializable]
     public struct LODInfo

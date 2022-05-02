@@ -12,6 +12,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 984e8fdc589ebc94cbba6c09360ced6d, type: 3}
   m_Name: Terrain Info
   m_EditorClassIdentifier: 
+  baseAltitude: 10000
   meshSquares: 240
   meshVerts: 241
   chunkSize: 5
@@ -49,6 +50,7 @@ MonoBehaviour:
     m_PreInfinity: 2
     m_PostInfinity: 2
     m_RotationOrder: 4
+  terrainCurveSampleSize: 255
   noiseOctaves: 5
   remapMin: -1000
   remapMax: 1000
@@ -56,8 +58,9 @@ MonoBehaviour:
   lods:
   - lod: 0
     distance: 6000
-  - lod: 2
+  - lod: 1
     distance: 14000
-  - lod: 4
+  - lod: 2
     distance: 26000
   cullDistance: 38000
+  heightCullDistance: 9450

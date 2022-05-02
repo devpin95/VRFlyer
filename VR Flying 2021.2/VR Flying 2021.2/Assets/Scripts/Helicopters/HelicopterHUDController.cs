@@ -14,11 +14,13 @@ public class HelicopterHUDController : MonoBehaviour
     public TextMeshProUGUI verticalspeed;
     public TextMeshProUGUI altitude;
     public TextMeshProUGUI terrainAltitude;
+
+    private WorldRepositionManager worldRepositionManager;
     
     // Start is called before the first frame update
     void Start()
     {
-        
+        worldRepositionManager = FindObjectOfType<WorldRepositionManager>();
     }
 
     // Update is called once per frame
@@ -30,7 +32,8 @@ public class HelicopterHUDController : MonoBehaviour
         airspeed.text = velocity.magnitude.ToString("n2");
         verticalspeed.text = velocity.y.ToString("n2");
 
-        altitude.text = transform.position.y.ToString("n2");
+        altitude.text = worldRepositionManager.playerWorldPos.y.ToString("n2");
+        // altitude.text = transform.position.y.ToString("n2");
 
         RaycastHit hit;
         bool hasHit = Physics.Raycast(transform.position, Vector3.down, out hit);

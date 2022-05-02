@@ -12,7 +12,11 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 767413e185c1f5f4f892321fe5ccd1ef, type: 3}
   m_Name: Game Data
   m_EditorClassIdentifier: 
+  _dataReady: 0
   _seed: 1811324023
   _perlinOffset: {x: 362, y: 403}
+  _playerStartingOffset: {x: 0, y: 0}
+  helipadPrefab: {fileID: 3265461365828384620, guid: 69163315e2bf6564a8343ac8a2553e47, type: 3}
+  pHelipadSpawn: 0.25
   structureList:
   - {fileID: 7456775056457753915, guid: 03d9f52c403a86c4ab63cd920b23b199, type: 3}

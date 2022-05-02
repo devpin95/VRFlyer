@@ -31,6 +31,8 @@ public class TerrainMap
     
     private float maxy = float.MinValue;
     private float miny = float.MaxValue;
+    public Vector2 maxypos = Vector2.negativeInfinity;
+    public Vector2 minypos = Vector2.negativeInfinity;
 
     // variables for generating octave noise
     private float[] _noiseFrequencies = null; // octave frequency 
@@ -49,29 +51,25 @@ public class TerrainMap
         mapsquares = dim - 1;
         heightmap = new float[dim, dim];
         
-        nativeHeightMap.Dispose();
-        nativeHeightMap = new NativeArray<float>(dim * dim, Allocator.Persistent);
+        // nativeHeightMap.Dispose();
+        // nativeHeightMap = new NativeArray<float>(dim * dim, Allocator.Persistent);
         
         maxy = float.MinValue;
-        nativemax.Dispose();
-        nativemax = new NativeArray<float>(1, Allocator.Persistent);
-        nativemax[0] = float.MinValue;
-        
+        maxypos = Vector2.negativeInfinity;
+
         miny = float.MaxValue;
-        nativemin.Dispose();
-        nativemin = new NativeArray<float>(1, Allocator.Persistent);
-        nativemin[0] = float.MinValue;
+        minypos = Vector2.negativeInfinity;
     }
 
     // DESTRUCTOR ------------------------------------
-    ~TerrainMap()
-    {
-        nativemin.Dispose();
-        nativemax.Dispose();
-        nativeHeightMap.Dispose();
-    }
+    // ~TerrainMap()
+    // {
+    //     nativemin.Dispose();
+    //     nativemax.Dispose();
+    //     nativeHeightMap.Dispose();
+    // }
 
-    public void SetMap(float[,] map, float min, float max)
+    public void SetMap(float[,] map, float min, float max, Vector2 minpos, Vector2 maxpos)
     {
         if (map.GetLength(0) != mapverts)
         {
@@ -82,6 +80,8 @@ public class TerrainMap
         heightmap = map;
         maxy = max;
         miny = min;
+        minypos = minpos;
+        maxypos = maxpos;
     }
     
     public void RequestMap(Vector2 offset, float chunkSize, Action<MapGenerationOutput, bool> callback, Queue<MapGenerationOutput> queue, int octaves = 5)
@@ -96,18 +96,18 @@ public class TerrainMap
 
         // ** IJob **
         // -------------------------------------------------------------------------------------------------------------
-        TerrainMapIJob tmijob = new TerrainMapIJob();
-        
-
-        JobHandle jobHandle = tmijob.Schedule();
-        jobHandle.Complete();
+        // TerrainMapIJob tmijob = new TerrainMapIJob();
+        //
+        //
+        // JobHandle jobHandle = tmijob.Schedule();
+        // jobHandle.Complete();
 
         // ** Thread pool **
         // -------------------------------------------------------------------------------------------------------------
         // // set up the thread data with the generation info, the callback to put on the queue, and the queue itself
-        // TerrainMapThreaded tmt = new TerrainMapThreaded(mapGenerationData, callback, queue);
-        //
-        // ThreadPool.QueueUserWorkItem(delegate { tmt.ThreadProc(); });
+        TerrainMapThreaded tmt = new TerrainMapThreaded(mapGenerationData, callback, queue);
+        
+        ThreadPool.QueueUserWorkItem(delegate { tmt.ThreadProc(); });
 
         // ** Thread **
         // -------------------------------------------------------------------------------------------------------------
@@ -118,6 +118,11 @@ public class TerrainMap
         // Thread thread = new Thread(threadStart);
         // thread.Start();
         // thread.Join();
+    }
+
+    public float SampleHeightMap(int x, int y)
+    {
+        return heightmap[x, y];
     }
 
     public void RequestMapJob(Vector2 offset, float chunkSize, int octaves = 5)
@@ -234,6 +239,45 @@ public class TerrainMap
 
         return vectormap;
         // return Utilities.Flatten2DArray(vectormap, lodWidth, lodWidth);
+    }
+
+    public void GetVectorMapNative(ref NativeArray<float3> nativeMap, float vertScale, float min, float max, AnimationCurve curve, int lod = 1)
+    {
+        AnimationCurve animCurve = new AnimationCurve(curve.keys);
+
+        int lodWidth = mapsquares / lod + 1;
+        
+        Debug.Log("LOD " + lod + " mesh has width " + lodWidth + " and area " + lodWidth * lodWidth);
+        
+        int vertIndex = 0;
+        for (int z = 0; z < mapverts; z += lod)
+        {
+            for (int x = 0; x < mapverts; x += lod)
+            {
+                float y = Utilities.Remap(animCurve.Evaluate(heightmap[x, z]), 0, 1, min, max);
+                nativeMap[vertIndex] = new float3(x * vertScale, y, z * vertScale);
+
+                ++vertIndex;
+            }
+        }
+    }
+
+    public int GetVertexArraySizeAtLOD(int lod)
+    {
+        int side = mapsquares / lod;
+        int verts = side + 1;
+        return verts * verts;
+    }
+
+    public int GetMeshDimAtLOD(int lod)
+    {
+        return mapverts / lod;
+    }
+    
+    public int GetIndexArraySizeAtLOD(int lod)
+    {
+        int side = mapsquares / lod;
+        return side * side * 6;
     }
 
     public Texture2D GetHeightMapTexture2D(AnimationCurve curve = null)
@@ -439,11 +483,6 @@ public class TerrainMap
         return normal;
     }
 
-    public float MapMin()
-    {
-        return miny;
-    }
-
     public float MapMinRemapped(float min, float max, AnimationCurve curve)
     {
         return Utilities.Remap(curve.Evaluate(miny), 0, 1, min, max);
@@ -457,6 +496,21 @@ public class TerrainMap
     public float MapMax()
     {
         return maxy;
+    }
+    
+    public float MapMin()
+    {
+        return miny;
+    }
+
+    public Vector3 MapMinPosition()
+    {
+        return new Vector3(minypos.x, heightmap[(int)minypos.x, (int)minypos.y], minypos.y);
+    }
+    
+    public Vector3 MapMaxPosition()
+    {
+        return new Vector3(maxypos.x, heightmap[(int)maxypos.x, (int)maxypos.y], maxypos.y);
     }
 
     public Vector3 SampleMapNormalAtXY(float[,] map, int x, int y)
@@ -515,6 +569,23 @@ public class TerrainMap
         
         return normal;
     }
+    
+    // STATIC FUNCTIONS ------------------------------------------------------------------------------------------------
+    // -----------------------------------------------------------------------------------------------------------------
+    // -----------------------------------------------------------------------------------------------------------------
+    // -----------------------------------------------------------------------------------------------------------------
+    
+    public static Vector3 ScaleMapPosition(Vector3 mapPos, float vertScale, AnimationCurve curve, float remapMin, float remapMax)
+    {
+        float height = curve.Evaluate(mapPos.y);
+        height = Utilities.Remap(height, 0, 1, remapMin, remapMax);
+        return new Vector3(mapPos.x * vertScale, height, mapPos.z * vertScale);
+    }
+    
+    // -----------------------------------------------------------------------------------------------------------------
+    // -----------------------------------------------------------------------------------------------------------------
+    // -----------------------------------------------------------------------------------------------------------------
+    // -----------------------------------------------------------------------------------------------------------------
 
     public struct MapGenerationInput
     {
@@ -542,6 +613,8 @@ public class TerrainMap
         public float[,] map;
         public float min;
         public float max;
+        public Vector2 minpos;
+        public Vector2 maxpos;
         public Action<MapGenerationOutput, bool> callback;
     }
 
@@ -575,6 +648,8 @@ public class TerrainMap
             // init the min and max values so we can remap later
             output.max = float.MinValue;
             output.min = float.MaxValue;
+            output.maxpos = Vector2.negativeInfinity;
+            output.minpos = Vector2.negativeInfinity;
 
             // convert these to ints now so we dont have to do it every loop
             int xoffset = (int) generationInput.offset.x;
@@ -587,8 +662,19 @@ public class TerrainMap
                 {
                     float y = Noise.SampleOctavePerlinNoise(x, z, generationInput.mapsquares, xoffset, zoffset, generationInput.chunkSize, octaveData);
 
-                    if (y < output.min) output.min = y;
-                    if (y > output.max) output.max = y;
+                    if (y < output.min)
+                    {
+                        output.min = y;
+                        output.minpos.x = x;
+                        output.minpos.y = z;
+                    }
+
+                    if (y > output.max)
+                    {
+                        output.max = y;
+                        output.maxpos.x = x;
+                        output.maxpos.y = z;
+                    }
 
                     output.map[x, z] = y;
                 }

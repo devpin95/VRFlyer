@@ -7,6 +7,7 @@ using Unity.Jobs;
 using Unity.VisualScripting;
 using UnityEditor;
 using UnityEngine;
+using Random = UnityEngine.Random;
 
 public class TerrainManager : MonoBehaviour
 {
@@ -49,6 +50,15 @@ public class TerrainManager : MonoBehaviour
 
     private float batchTime = 0.25f;
     private float lastBatchScheduledTime;
+    
+    // terrain
+    private int _expectedTerrainGenerationEventCount;
+    private int _currentTerrainGenerationEventCount = 0;
+    private bool _startup = true;
+
+    [Header("Events")] 
+    [Tooltip("Event evoked when the terrain has been completely generated and is ready for other terrain functions")] 
+    public CEvent terrainReadyEvent;
 
     private void Awake()
     {
@@ -63,6 +73,8 @@ public class TerrainManager : MonoBehaviour
         _activeGridChunks = new Dictionary<GridCoordinate, GameObject>();
 
         lastBatchScheduledTime = Time.realtimeSinceStartup;
+        
+        _expectedTerrainGenerationEventCount = TerrainChunkPool.Instance.poolSize;
 
         // do this in start so that the player doesnt have to travel playerTravelDistanceUpdateThreshold before generating the terrain
         // actually, we can't do this in start because some of the terrain chunks will not have done their start so we will get an error
@@ -202,23 +214,27 @@ public class TerrainManager : MonoBehaviour
                 _activeGridChunks.Add(coord, chunkInstance);
 
                 // set up the mesh manager before we ask it to generate the terrain
-                AdvancedMeshManager meshManager = chunkInstance.GetComponent<AdvancedMeshManager>();
+                MeshManager meshManager = chunkInstance.GetComponent<MeshManager>();
                     
                 if ( meshManager == null ) Debug.LogWarning("No object returned from pool");
                     
                 meshManager.SetRepositionOffset(totalWorldOffset); // set the reposition offset for this chunk so that it can be positioned properly
-                // meshManager.SetGridPosition(new Vector2(coord.x, coord.y)); // set the grid coordinate for this chunk
+                meshManager.SetGridPosition(new Vector2(coord.x, coord.y)); // set the grid coordinate for this chunk
                 // meshManager.EnableRenderer(); // make sure that the renderer is re-enabled if it was off
                 // meshManager.SetLod(0);
 
                 // get the chunk to start building the terrain
-                meshManager.BuildTerrain(new Vector2(coord.x, coord.y));
+                meshManager.BuildTerrain();
 
-                // yield return new WaitForSeconds(1 / 60 * 5);
+                if ( !_startup ) yield return new WaitForSeconds(Random.Range(0, 1 / newActiveGrid.Count * 5));
 
                 addedItems += "[" + coord.x + ", " + coord.y + "]";
             }
         }
+        
+        // set this to false so that the next time we run through this loop we add a little delay between each
+        // build call
+        _startup = false;
         
         Debug.Log("Added " + addedItems);
 
@@ -230,89 +246,25 @@ public class TerrainManager : MonoBehaviour
     {
         totalWorldOffset += offset;
     }
+    
+    public void TerrainInitialGenerationResponse()
+    {
+        _currentTerrainGenerationEventCount++;
+        
+        // Debug.Log(_currentTerrainGenerationEventCount + " / " + _expectedTerrainGenerationEventCount + " chunks initialized");
 
-    // public void ButtonTest()
-    // {
-    //     foreach (var mesh in meshManagers)
-    //     {
-    //         mesh.meshVerts = meshVerts;
-    //         mesh.meshSquares = meshVerts - 1;
-    //         mesh.vertexScale = vertexScale;
-    //         mesh.chunkSize = offsetScale;
-    //         mesh.noiseOctaves = noiseOctaves;
-    //         mesh.remapMin = remapMin;
-    //         mesh.remapMax = remapMax;
-    //         mesh.terrainCurve = terrainCurve;
-    //         mesh.ButtonTest();
-    //     }
-    //
-    //     int fullmapdim = (int)Mathf.Sqrt(meshManagers.Count);
-    //     Texture2D fullmap = new Texture2D(fullmapdim, fullmapdim);
-    // }
+        if (_currentTerrainGenerationEventCount == _expectedTerrainGenerationEventCount)
+        {
+            // do something to tell the game the terrain has been generated
+            Debug.Log("Terrain has been generated, do something now");
+            foreach (var chunk in _activeGridChunks)
+            {
+                MeshManager meshManager = chunk.Value.GetComponent<MeshManager>();
+                meshManager.ForceLODCheck();
+            }
+            
+            // notify everyone that the terrain has been generated
+            terrainReadyEvent.Raise();
+        }
+    }
 }
-
-// [CustomEditor(typeof(TerrainManager))]
-// public class TerrainManagerEditor : Editor 
-// {
-//     private SerializedProperty meshes;
-//     private float mapdim = 150f;
-//     private float edgesqr = 1;
-//     private int submapdim = 1;
-//     private float xoffset = 20;
-//     private float yoffset = 30;
-//
-//     void OnEnable()
-//     {
-//         meshes = serializedObject.FindProperty("meshManagers");
-//
-//         edgesqr = (int)Mathf.Sqrt(meshes.arraySize);
-//         submapdim = (int)(mapdim / edgesqr);
-//         yoffset += submapdim * (edgesqr / 2);
-//     }
-//     
-//     public override void OnInspectorGUI()
-//     {
-//         serializedObject.Update();
-//         
-//         TerrainManager script = (TerrainManager) target;
-//         if (GUILayout.Button("Update Meshes"))
-//         {
-//             script.ButtonTest();
-//             EditorUtility.SetDirty(script);
-//             serializedObject.Update();
-//         }
-//
-//         // EditorGUI.PrefixLabel(new Rect(25, 180, 100, 15), 0, new GUIContent(meshes.arraySize.ToString()));
-//
-//         // Debug.Log(submapdim);
-//         //
-//         // for (int i = 0; i < meshes.arraySize; ++i)
-//         // {
-//         //     SerializedProperty prop = meshes.GetArrayElementAtIndex(i);
-//         //
-//         //     SerializedObject obj = new SerializedObject(prop.objectReferenceValue);
-//         //     
-//         //     SerializedProperty map = obj.FindProperty("heightMapTex");
-//         //     SerializedProperty offset = obj.FindProperty("gridOffset");
-//         //     
-//         //     // Debug.Log(map + " " + offset.vector2Value);
-//         //
-//         //     Vector2 moffset = offset.vector2Value;
-//         //     float x = moffset.x * submapdim + xoffset;
-//         //     float y = edgesqr - moffset.y * submapdim + yoffset;
-//         //
-//         //     Texture2D tex = (Texture2D) map.objectReferenceValue;
-//         //     tex = Utilities.ResizeTexture2D(tex, submapdim, submapdim);
-//         //     
-//         //     if ( tex ) EditorGUI.DrawPreviewTexture(new Rect(x, y, submapdim, submapdim), tex);
-//         // }
-//         //
-//         // EditorGUILayout.Space(edgesqr * submapdim + 30);
-//
-//         DrawDefaultInspector();
-//             
-//         serializedObject.ApplyModifiedProperties();
-//         
-//         // DrawDefaultInspector();
-//     }
-// }

@@ -2,11 +2,15 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
+using System.Runtime.CompilerServices;
 using System.Threading;
 using Unity.Collections;
 using Unity.Jobs;
+using Unity.Mathematics;
+using Unity.VisualScripting;
 using UnityEngine;
 using UnityEditor;
+using UnityEngine.Rendering;
 using UnityEngine.Serialization;
 using UnityEngine.UI;
 using Random = UnityEngine.Random;
@@ -31,9 +35,10 @@ public class MeshManager : MonoBehaviour
     // public float vertexScale = 1;
     // public AnimationCurve terrainCurve;
     [Range(-1, 6)]
-    public int LOD = 6;
-    
-    [Header("Terrain")]
+    public int LOD;
+
+    [Header("Terrain")] 
+    private GameObject _structureContainer;
     // public int noiseOctaves = 5;
     // public float remapMin = -500;
     // public float remapMax = 500;
@@ -69,6 +74,14 @@ public class MeshManager : MonoBehaviour
 
     private bool startup = true;
 
+    private bool[] _initializedMeshes;
+    private LODMesh[] _meshLODs;
+    private Mesh.MeshDataArray _meshDataArray;
+    
+    [Header("Events")]
+    public CEvent initialGenerationEvent;
+    public CEvent_Vector3 helipadSpawnPointNotification;
+
     [Serializable]
     public struct LODInfo
     {
@@ -81,9 +94,22 @@ public class MeshManager : MonoBehaviour
             this.distance = distance;
         }
     }
+
+    private struct LODMesh
+    {
+        public GameObject instance;
+        public MeshRenderer meshRenderer;
+        public MeshFilter meshFilter;
+        public MeshCollider meshCollider;
+        public Mesh mesh;
+    }
     
     [Header("DEBUG")] 
     public Image img;
+
+    public bool atCullDistance;
+    public bool beneathCullHeight;
+    public bool culled = false;
 
     // Start is called before the first frame update
     void Awake()
@@ -100,19 +126,35 @@ public class MeshManager : MonoBehaviour
         _terrainMap.InitMap(terrainInfo.meshVerts);
         _meshBounds = new Bounds();
 
-        _meshFilter = GetComponent<MeshFilter>();
-        _meshCollider = GetComponent<MeshCollider>();
-        _meshRenderer = GetComponent<Renderer>();
-
-        _mesh = new Mesh();
-        _mesh.MarkDynamic();
+        // _meshFilter = GetComponent<MeshFilter>();
+        // _meshCollider = GetComponent<MeshCollider>();
+        // _meshRenderer = GetComponent<Renderer>();
+        //
+        // _mesh = new Mesh();
+        // _mesh.MarkDynamic();
 
         _worldRepositionManager = FindObjectOfType<WorldRepositionManager>().GetComponent<WorldRepositionManager>();
+
+        LOD = LODUtility.LowestLOD(terrainInfo).lod;
+        _initializedMeshes = new bool[LODUtility.MaxLODCount()]; // initialize them all to false
+        _meshLODs = new LODMesh[LODUtility.MaxLODCount()];
+        _meshDataArray = Mesh.AllocateWritableMeshData(LODUtility.MaxLODCount());
+        
+        // create an empty gameobject to hold all of the structures for a given terrain
+        _structureContainer = new GameObject();
+        _structureContainer.transform.position = Vector3.zero;
+        _structureContainer.transform.SetParent(transform, worldPositionStays: false);
+        _structureContainer.transform.name = "Structures";
     }
 
     private void Start()
     {
         previousPlayerPosition = playerTransform.position;
+    }
+
+    private void OnDestroy()
+    {
+        _meshDataArray.Dispose();
     }
 
     private void Update()
@@ -132,15 +174,26 @@ public class MeshManager : MonoBehaviour
 
         distanceFromPlayer = Mathf.Sqrt(_meshBounds.SqrDistance(playerTransform.position));
 
-        if (distanceFromPlayer > terrainInfo.cullDistance) _meshRenderer.enabled = false;
-        else _meshRenderer.enabled = true;
+        // if (distanceFromPlayer > terrainInfo.cullDistance) _meshRenderer.enabled = false;
+        // else _meshRenderer.enabled = true;
+        
+        // cull chunks that are too far away from the player or if the player is beneath the cull height
+        atCullDistance = distanceFromPlayer > terrainInfo.cullDistance; // too far away
+        beneathCullHeight = _worldRepositionManager.playerWorldPos.y < terrainInfo.heightCullDistance; // too low
+        beneathCullHeight = beneathCullHeight && LOD != 0;
+        if (atCullDistance || beneathCullHeight) _meshLODs[LOD].instance?.SetActive(false);
+        else _meshLODs[LOD].instance?.SetActive(true);
 
         // only recalculate the LOD when the player has traveled a certain distance
         if (Vector3.Distance(previousPlayerPosition, playerTransform.position) > terrainInfo.recalculateLodDistance)
         {
-            startup = false; // make sure to set this to false so we only force this loop once at the start
-            
-            // loop through all of the LODs and determine which LOD we need to target
+            FindNewLOD();
+        }
+    }
+
+    private void FindNewLOD()
+    {
+        // loop through all of the LODs and determine which LOD we need to target
             // loop backwards and if the player distance is greater than any LOD distance, we know the mesh needs
             // to be at the LOD
             bool lodChange = false;
@@ -165,19 +218,58 @@ public class MeshManager : MonoBehaviour
             }
             
             // only swap our LOD if we actually need to swap to a different LOD
-            if (targetLOD / 2 != LOD && lodChange)
+            if (targetLOD != LOD && lodChange)
             {
-                LOD = targetLOD / 2;
+                int oldLOD = LOD;
+                LOD = targetLOD;
 
-                // set up a stub of the information we would have gotten from the map generation thread
-                TerrainMap.MapGenerationOutput meshGenerationInfoStub = new TerrainMap.MapGenerationOutput();
-                meshGenerationInfoStub.map = _terrainMap.Get2DHeightMap();
-                meshGenerationInfoStub.min = _terrainMap.MapMin();
-                meshGenerationInfoStub.max = _terrainMap.MapMax();
+                if (_initializedMeshes[LOD])
+                {
+                    // the mesh at the target LOD has already been generated, so we dont need to regenerate it
+                    SwapLODMesh(oldLOD, LOD);
+                }
+                else
+                {
+                    //disable the old mesh
+                    if ( _meshLODs[oldLOD].instance ) _meshLODs[oldLOD].instance?.SetActive(false);
 
-                // call the function to start the mesh generation thread
-                MapGenerationReceived(meshGenerationInfoStub, true);
+                    // set up a stub of the information we would have gotten from the map generation thread
+                    TerrainMap.MapGenerationOutput meshGenerationInfoStub = new TerrainMap.MapGenerationOutput();
+                    meshGenerationInfoStub.map = _terrainMap.Get2DHeightMap();
+                    meshGenerationInfoStub.min = _terrainMap.MapMin();
+                    meshGenerationInfoStub.max = _terrainMap.MapMax();
+
+                    // call the function to start the mesh generation thread
+                    MapGenerationReceived(meshGenerationInfoStub, true);   
+                }
             }
+    }
+
+    public void ForceLODCheck()
+    {
+        FindNewLOD();
+    }
+
+    private void CreateMeshLODGameObject(int targetLOD)
+    {
+        _meshLODs[targetLOD].instance = new GameObject();
+        _meshLODs[targetLOD].instance.transform.position = Vector3.zero;
+        _meshLODs[targetLOD].instance.transform.SetParent(transform, worldPositionStays: false);
+        _meshLODs[targetLOD].instance.name = "LOD " + targetLOD;
+
+        _meshLODs[targetLOD].meshFilter = _meshLODs[targetLOD].instance.AddComponent<MeshFilter>();
+        _meshLODs[targetLOD].meshRenderer = _meshLODs[targetLOD].instance.AddComponent<MeshRenderer>();
+        _meshLODs[targetLOD].meshCollider = _meshLODs[targetLOD].instance.AddComponent<MeshCollider>();
+
+        _meshLODs[targetLOD].meshRenderer.material = _terrainMaterial;
+
+        _meshLODs[targetLOD].mesh = new Mesh();
+        _meshLODs[targetLOD].mesh.MarkDynamic();
+
+        // if the target LOD is NOT the highest LOD, then disable it's shadows for better performance
+        if (targetLOD != 0)
+        {
+            _meshLODs[targetLOD].meshRenderer.shadowCastingMode = ShadowCastingMode.Off;
         }
     }
     
@@ -197,7 +289,6 @@ public class MeshManager : MonoBehaviour
 
     private void MapGenerationReceived(TerrainMap.MapGenerationOutput output, bool stub = false)
     {
-        if (LOD <= -1) Debug.Log("Hey, " + transform.name + ", it's not right, you jabroni");
         StartCoroutine(MapGenerationCoroutine(output, stub));
     }
 
@@ -205,7 +296,7 @@ public class MeshManager : MonoBehaviour
     {
         if (!stub)
         {
-            _terrainMap.SetMap(output.map, output.min, output.max);
+            _terrainMap.SetMap(output.map, output.min, output.max, output.minpos, output.maxpos);
             yield return null;
             heightMapTex = _terrainMap.GetHeightMapTexture2D();
             yield return null;
@@ -217,17 +308,17 @@ public class MeshManager : MonoBehaviour
         yield return null;
         
         // clear the mesh arrays before we start making new ones
-        if (_uvs != null) Array.Clear(_uvs, 0, _vertices.Length); // do this one first because we dont want to clear _vertices before we get it's length here
-        yield return null;
-        if (_vertices != null) Array.Clear(_vertices, 0, _vertices.Length);
-        yield return null;
-        if (_triangles != null) Array.Clear(_triangles, 0, _triangles.Length);
-        yield return null;
+        // if (_uvs != null) Array.Clear(_uvs, 0, _vertices.Length); // do this one first because we dont want to clear _vertices before we get it's length here
+        // yield return null;
+        // if (_vertices != null) Array.Clear(_vertices, 0, _vertices.Length);
+        // yield return null;
+        // if (_triangles != null) Array.Clear(_triangles, 0, _triangles.Length);
+        // yield return null;
 
         // set up the mesh generation input
         // int lodMeshVerts = meshVerts / (LOD == 0 ? 1 : LOD * 2);
         // int lodMeshSquares = lodMeshVerts - 1;
-        int meshDim = (terrainInfo.meshVerts - 1) / (LOD == 0 ? 1 : LOD * 2) + 1;
+        int meshDim = (terrainInfo.meshVerts - 1) / LODUtility.LODToMeshResolution(LOD) + 1;
         MeshGenerationInput meshGenerationInput = new MeshGenerationInput(
             _terrainMap, 
             meshDim, 
@@ -235,29 +326,29 @@ public class MeshManager : MonoBehaviour
             terrainInfo.remapMin, 
             terrainInfo.remapMax, 
             terrainInfo.terrainCurve, 
-            (LOD == 0 ? 1 : LOD * 2), 
-            reposition: !stub);
-        
+            LODUtility.LODToMeshResolution(LOD),
+            ref _meshDataArray);
+
         yield return null;
 
         // ** IJob **
         // -------------------------------------------------------------------------------------------------------------
-        MeshBuilderIJob builderIJob = new MeshBuilderIJob();
-        builderIJob.meshInfo = meshGenerationInput;
-        builderIJob.callback = MeshGenerationReceived;
-        builderIJob.resultQ = _meshThreadResultQueue;
-
-        JobHandle jobHandle = builderIJob.Schedule();
-        jobHandle.Complete();
+        // MeshBuilderIJob builderIJob = new MeshBuilderIJob();
+        // builderIJob.meshInfo = meshGenerationInput;
+        // builderIJob.callback = MeshGenerationReceived;
+        // builderIJob.resultQ = _meshThreadResultQueue;
+        //
+        // JobHandle jobHandle = builderIJob.Schedule();
+        // jobHandle.Complete();
         
         // ** thread pool **
         // -------------------------------------------------------------------------------------------------------------
         // // make the new builder thread object with the input, the output queue, and the callback we need to invoke
-        // MeshBuilderThread builderThread = new MeshBuilderThread(meshGenerationInput, _meshThreadResultQueue, MeshGenerationReceived);
-        //
-        // yield return null;
-        //
-        // ThreadPool.QueueUserWorkItem(delegate { builderThread.ThreadProc(); });
+        MeshBuilderThread builderThread = new MeshBuilderThread(ref meshGenerationInput, _meshThreadResultQueue, MeshGenerationReceived);
+        
+        yield return null;
+        
+        ThreadPool.QueueUserWorkItem(delegate { builderThread.ThreadProc(); });
 
         // // make a ThreadStart that will call the MeshBuilderThread.ThreadProc and to run the mesh generation on a thread
         // ThreadStart threadStart = delegate { builderThread.ThreadProc(); };
@@ -276,42 +367,62 @@ public class MeshManager : MonoBehaviour
 
     IEnumerator MeshGenerationCoroutine(MeshGenerationOutput generationOutput)
     {
-        _mesh.Clear();
+        // _mesh.Clear();
+        // ----- >
+        int targetLod = generationOutput.targetLod; // make a copy of this so everything is easier to read later
+        
+        // if the mesh hasnt been created, create it
+        // if the mesh is already created, then clear it so we can update it with the new heightmap
+        if (_meshLODs[targetLod].instance == null) CreateMeshLODGameObject(targetLod);
+        else _meshLODs[targetLod].mesh.Clear();
 
         yield return null;
         
-        // reset the mesh with the verts, triangles, and uvs that were generated in the thread
-        _mesh.vertices = generationOutput.vertices;
-
+        // Mesh.ApplyAndDisposeWritableMeshData(generationOutput.meshDataArray, _mesh);
+        // ----- >
+        // Mesh.ApplyAndDisposeWritableMeshData(generationOutput.meshDataArray, _meshLODs[generationOutput.targetLod].mesh);
+        NativeArray<float3> targetVerts = generationOutput.meshDataArray[targetLod].GetVertexData<float3>((int)MeshBuilderThread.MeshDataStreams.Vertices);
+        NativeArray<float2> targetUVs = generationOutput.meshDataArray[targetLod].GetVertexData<float2>((int)MeshBuilderThread.MeshDataStreams.UVs);
+        NativeArray<uint> targetIndices = generationOutput.meshDataArray[targetLod].GetIndexData<uint>();
+        
+        _meshLODs[targetLod].mesh.SetVertices(targetVerts, 0, targetVerts.Length, MeshUpdateFlags.DontRecalculateBounds | MeshUpdateFlags.DontValidateIndices);
         yield return null;
-        
-        _mesh.triangles = generationOutput.triangles;
-        
+        _meshLODs[targetLod].mesh.SetUVs(0, targetUVs);
         yield return null;
-        
-        _mesh.uv = generationOutput.uvs;
-        
+        _meshLODs[targetLod].mesh.SetIndices(targetIndices, MeshTopology.Triangles, 0, calculateBounds: false);
         yield return null;
         
         // recalculate the normals so that everything looks right
-        _mesh.RecalculateNormals();
+        //_mesh.RecalculateNormals();
+        // ----- >
+        _meshLODs[targetLod].mesh.RecalculateNormals();
         
         yield return null;
         
-        _mesh.RecalculateBounds();
+        // _mesh.RecalculateBounds();
+        // ----- >
+        _meshLODs[targetLod].mesh.RecalculateBounds();
         
         yield return null;
         
-        _mesh.MarkModified();
+        // _mesh.MarkModified();
+        // ----- >
+        _meshLODs[targetLod].mesh.MarkModified();
         
         yield return null;
         
         // updated the mesh on the filter and collider
-        _meshFilter.sharedMesh = _mesh;
-        
+        // _meshFilter.sharedMesh = _mesh;
+        // ----- >
+        // _meshFilter.sharedMesh = _meshLODs[generationOutput.targetLod].mesh;
+        _meshLODs[targetLod].meshFilter.sharedMesh = _meshLODs[targetLod].mesh;
+            
         yield return null;
         
-        _meshCollider.sharedMesh = _mesh;
+        // _meshCollider.sharedMesh = _mesh;
+        // ----- >
+        // _meshCollider.sharedMesh = _meshLODs[generationOutput.targetLod].mesh;
+        _meshLODs[targetLod].meshCollider.sharedMesh = _meshLODs[targetLod].mesh;
         
         yield return null;
         
@@ -326,6 +437,25 @@ public class MeshManager : MonoBehaviour
         yield return null;
         
         CalculateBounds();
+
+        // set the flag for this lod to true to indicate that this LOD has been generated
+        _initializedMeshes[generationOutput.targetLod] = true;
+
+        BuildStructures();
+
+        if (startup)
+        {
+            initialGenerationEvent.Raise();
+            startup = false;
+        }
+    }
+
+    private void SwapLODMesh(int oldLod, int targetLod)
+    {
+        _meshLODs[oldLod].instance?.SetActive(false);
+        _meshLODs[targetLod].instance.SetActive(true);
+        // _meshFilter.sharedMesh = _meshLODs[targetLod].mesh;
+        // _meshCollider.sharedMesh = _meshLODs[targetLod].mesh;
     }
 
     private void CalculateBounds()
@@ -343,77 +473,60 @@ public class MeshManager : MonoBehaviour
     
     private void BuildStructures()
     {
-        float fullwidth = terrainInfo.meshSquares * terrainInfo.vertexScale;
+        GridOriginStructures();
         
-        int numStructures = Random.Range(0, Random.Range(0, 10));
-        
-        Debug.Log(transform.name + " generating " + numStructures + " structures");
+        // float fullwidth = terrainInfo.meshSquares * terrainInfo.vertexScale;
+        //
+        // int numStructures = Random.Range(0, Random.Range(0, 10));
+        //
+        // Debug.Log(transform.name + " generating " + numStructures + " structures");
+        //
+        // for (int i = 0; i < numStructures; ++i)
+        // {
+        //     GameObject prefab = _gameData.structureList[Random.Range(0, _gameData.structureList.Count)];
+        //     GameObject structure = Instantiate(prefab, transform);
+        //     structure.transform.SetParent(transform); // make sure that the terrain is the structures parent
+        //     structure.transform.localPosition = Vector3.zero;
+        //
+        //     // set a random position for the structure
+        //     float randx = Random.Range(0, fullwidth);
+        //     float randz = Random.Range(0, fullwidth);
+        //     Vector3 structurePos = new Vector3(randx, 5000, randz);
+        //     structure.transform.localPosition = structurePos;
+        //     
+        //     structure.GetComponent<Structure>().PlantStructure();
+        // }
+    }
 
-        for (int i = 0; i < numStructures; ++i)
+    private void GridOriginStructures()
+    {
+        // this function controls the structures that are required at the origin of the grid
+        if (gridOffset != Vector2.zero) return;
+        
+        // plant a guaranteed helipad at the lowest point of the 0x0 grid chunk
+        Vector3 lowestPoint = _terrainMap.MapMinPosition();
+        Vector3 chunkPosition = TerrainMap.ScaleMapPosition(lowestPoint, terrainInfo.vertexScale, terrainInfo.terrainCurve, terrainInfo.remapMin, terrainInfo.remapMax);
+
+        // get an instance of a helipad
+        GameObject helipadInstance = Instantiate(_gameData.helipadPrefab, chunkPosition, Quaternion.identity);
+        helipadInstance.transform.SetParent(_structureContainer.transform, false);
+        
+        // reposition the helipad so that the point it touches the ground matches the legs of the helipad instead
+        // of the pivot of the helipad object
+        Vector3 helipadAttachPoint = helipadInstance.transform.Find("Attach Point").position;
+        Vector3 helipadAttachPointToChunkPoint = chunkPosition - helipadAttachPoint;
+        helipadInstance.transform.position += helipadAttachPointToChunkPoint;
+
+        // get the point of the helipad where we want to attach the helicopter to so that it is "landed" on the pad
+        Vector3 landingPoint = helipadInstance.transform.Find("Landing Point").transform.position;
+
+        // if we're at startup, we need to announce where this helipad will be placed so that the helicopter can
+        // be spawned at it instead of in the air
+        if (startup)
         {
-            GameObject prefab = _gameData.structureList[Random.Range(0, _gameData.structureList.Count)];
-            GameObject structure = Instantiate(prefab, transform);
-            structure.transform.SetParent(transform); // make sure that the terrain is the structures parent
-            structure.transform.localPosition = Vector3.zero;
-
-            // set a random position for the structure
-            float randx = Random.Range(0, fullwidth);
-            float randz = Random.Range(0, fullwidth);
-            Vector3 structurePos = new Vector3(randx, 5000, randz);
-            structure.transform.localPosition = structurePos;
-            
-            structure.GetComponent<Structure>().PlantStructure();
+            helipadSpawnPointNotification.Raise(landingPoint);
         }
     }
-    
-    // private void CreateVerts()
-    // {
-    //     _vertices = _terrainMap.GetRemappedFlattenedVectorMap(vertScale: vertexScale, min: remapMin, max: remapMax, curve: terrainCurve);
-    //     // _vertices[0] = new Vector3(_vertices[0].x, remapMax, _vertices[0].z);
-    // }
-    //
-    // private void CreateTris()
-    // {
-    //     // checkpointNotification.Raise("Generating " + (_data.dimension + 2) * (_data.dimension + 2) + " polygons...");
-    //     List<int> trilist = new List<int>();
-    //
-    //     for( int z = 0; z < meshSquares; ++z )
-    //     {
-    //         int offset = z * (meshSquares + 1); // offset
-    //         for (int x = 0; x < meshSquares; ++x)
-    //         {
-    //             int bl = x + offset;
-    //             int tl = x + meshSquares + offset + 1;
-    //             int tr = x + meshSquares + offset + 2;
-    //             int br = x + offset + 1;
-    //             
-    //             // left tri
-    //             trilist.Add(br);
-    //             trilist.Add(tl);
-    //             trilist.Add(bl);
-    //
-    //             // right tri
-    //             trilist.Add(tr);
-    //             trilist.Add(tl);
-    //             trilist.Add(br);
-    //         }
-    //     }
-    //     
-    //     // Debug.Log("Mesh has " + trilist.Count / 3 + " triangles");
-    //     _triangles = trilist.ToArray();
-    // }
-    //
-    // private void CreateNormals()
-    // {
-    //     _normals = Utilities.Flatten2DArray(_terrainMap.GetNormalMap(remapMin, remapMax), meshVerts, meshVerts);
-    // }
-    //
-    // private void CreateUVs()
-    // {
-    //     _uvs = new Vector2[_vertices.Length];
-    //     
-    //     for (int i = 0; i < _vertices.Length; ++i) _uvs[i] = new Vector2(_vertices[i].x, _vertices[i].z);
-    // }
 
     public void Reposition(Vector3 offset)
     {
@@ -454,25 +567,30 @@ public class MeshManager : MonoBehaviour
     {
         previousGridOffset = gridOffset;
         gridOffset = pos;
-        // BuildTerrain();
-        // ManualReposition(_repositionOffset);
+        _initializedMeshes = new bool[LODUtility.MaxLODCount()]; // reset the array to all false
+
+        // destroy them for now, in the future we need to do something with pools to make this faster
+        int structureCount = _structureContainer.transform.childCount;
+        for (int i = structureCount - 1; i >= 0; --i)
+        {
+            Destroy(_structureContainer.transform.GetChild(i).gameObject);
+        }
     }
 
-    public void EnableRenderer()
-    {
-        _meshRenderer.enabled = true;
-    }
-    
     public struct MeshGenerationOutput
     {
         public Vector3[] vertices;
         public int[] triangles;
         public Vector2[] uvs;
-
-        public bool reposition;
-        // private Vector3[] normals;
+        public Mesh.MeshDataArray meshDataArray;
+        public int targetLod;
 
         public Action<MeshGenerationOutput, bool> callback;
+
+        public void SetMeshDataArray(ref Mesh.MeshDataArray meshDataArray)
+        {
+            this.meshDataArray = meshDataArray;
+        }
     }
 
     public struct MeshGenerationInput
@@ -483,10 +601,10 @@ public class MeshManager : MonoBehaviour
         public float remapMin;
         public float remapMax;
         public AnimationCurve terrainCurve;
-        public int lod;
-        public bool reposition;
+        public int resolution;
+        public Mesh.MeshDataArray meshDataArray;
 
-        public MeshGenerationInput(TerrainMap map, int dim, float vertexScale, float remapMin, float remapMax, AnimationCurve terrainCurve, int lod, bool reposition)
+        public MeshGenerationInput(TerrainMap map, int dim, float vertexScale, float remapMin, float remapMax, AnimationCurve terrainCurve, int resolution, ref Mesh.MeshDataArray meshDataArray)
         {
             this.map = map;
             this.dim = dim;
@@ -494,19 +612,26 @@ public class MeshManager : MonoBehaviour
             this.remapMin = remapMin;
             this.remapMax = remapMax;
             this.terrainCurve = terrainCurve;
-            this.lod = lod;
-            this.reposition = reposition;
+            this.resolution = resolution;
+            this.meshDataArray = meshDataArray;
         }
     }
     
     private class MeshBuilderThread
     {
+        public enum MeshDataStreams : int
+        {
+            Vertices = 0,
+            UVs = 1
+        }
+        
         private MeshGenerationInput meshInfo;
         private Queue<MeshGenerationOutput> resultQ;
         private Action<MeshGenerationOutput, bool> callback;
         private MeshGenerationOutput meshGenerationOutput;
+        private NativeArray<VertexAttributeDescriptor> meshVertexAttributes; 
         
-        public MeshBuilderThread(MeshGenerationInput meshInfo, Queue<MeshGenerationOutput> resultQ, Action<MeshGenerationOutput, bool> callback)
+        public MeshBuilderThread(ref MeshGenerationInput meshInfo, Queue<MeshGenerationOutput> resultQ, Action<MeshGenerationOutput, bool> callback)
         {
             this.meshInfo = meshInfo;
             this.resultQ = resultQ;
@@ -517,12 +642,33 @@ public class MeshManager : MonoBehaviour
         {
             meshGenerationOutput = new MeshGenerationOutput();
             meshGenerationOutput.callback = callback;
+            meshGenerationOutput.meshDataArray = meshInfo.meshDataArray;
+            meshGenerationOutput.targetLod = LODUtility.MeshResolutionToLOD(meshInfo.resolution);
+            // meshGenerationOutput.SetMeshDataArray(ref meshDataArray);
 
-            CreateVerts();
-            CreateTris();
-            CreateUVs();
+            Debug.Log("Mesh Done");
             
+            SetVertexDescriptors();
+            int targetLOD = LODUtility.MeshResolutionToLOD(meshInfo.resolution);
+            Mesh.MeshData data = meshInfo.meshDataArray[targetLOD];
+            data.SetVertexBufferParams(meshInfo.map.GetVertexArraySizeAtLOD(meshInfo.resolution), meshVertexAttributes);
+            data.SetIndexBufferParams(meshInfo.map.GetIndexArraySizeAtLOD(meshInfo.resolution), IndexFormat.UInt32);
+            meshVertexAttributes.Dispose();
+            
+            
+            // CreateVerts();
+            CreateVertsNative(data);
+            // CreateTris();
+            CreateTrisNative(data);
+            // CreateUVs();
+            CreateUVsNative(data);
+
             // Debug.Log("Mesh will have verts[" + meshInfo.dim * meshInfo.dim + "] tris[" + (meshInfo.dim - 1) * (meshInfo.dim - 1) + "] uvs[" + meshGenerationOutput.uvs.Length + "]");
+
+            data.subMeshCount = 1;
+            MeshUpdateFlags smflags = MeshUpdateFlags.DontRecalculateBounds | MeshUpdateFlags.DontValidateIndices | MeshUpdateFlags.DontNotifyMeshUsers;
+            SubMeshDescriptor smdes = new SubMeshDescriptor(0, meshInfo.map.GetIndexArraySizeAtLOD(meshInfo.resolution));
+            data.SetSubMesh(0, smdes, smflags);
 
             lock (resultQ) resultQ.Enqueue(meshGenerationOutput);
         }
@@ -535,8 +681,21 @@ public class MeshManager : MonoBehaviour
                     min: meshInfo.remapMin, 
                     max: meshInfo.remapMax, 
                     curve: meshInfo.terrainCurve, 
-                    lod: meshInfo.lod
+                    lod: meshInfo.resolution
                 );
+        }
+
+        private void CreateVertsNative(Mesh.MeshData data)
+        {
+            var vertdata = data.GetVertexData<float3>();
+            meshInfo.map.GetVectorMapNative(
+                nativeMap: ref vertdata,
+                vertScale: meshInfo.vertexScale, 
+                min: meshInfo.remapMin, 
+                max: meshInfo.remapMax, 
+                curve: meshInfo.terrainCurve, 
+                lod: meshInfo.resolution
+            );
         }
     
         private void CreateTris()
@@ -571,6 +730,35 @@ public class MeshManager : MonoBehaviour
             meshGenerationOutput.triangles = trilist.ToArray();
         }
 
+        private void CreateTrisNative(Mesh.MeshData data)
+        {
+            var trilist = data.GetIndexData<uint>();
+            uint width = (uint)meshInfo.dim - 1;
+            int index = 0;
+            
+            for( uint z = 0; z < width; ++z )
+            {
+                uint offset = z * (width + 1); // offset
+                for (uint x = 0; x < width; ++x)
+                {
+                    uint bl = x + offset;
+                    uint tl = x + width + offset + 1;
+                    uint tr = x + width + offset + 2;
+                    uint br = x + offset + 1;
+                
+                    // left tri
+                    trilist[index++] = tl;
+                    trilist[index++] = br;
+                    trilist[index++] = bl;
+
+                    // right tri
+                    trilist[index++] = tl;
+                    trilist[index++] = tr;
+                    trilist[index++] = br;
+                }
+            }
+        }
+        
         private void CreateUVs( )
         {
             meshGenerationOutput.uvs = new Vector2[meshGenerationOutput.vertices.Length];
@@ -579,6 +767,35 @@ public class MeshManager : MonoBehaviour
             {
                 meshGenerationOutput.uvs[i] = new Vector2(meshGenerationOutput.vertices[i].x, meshGenerationOutput.vertices[i].z);
             }
+        }
+
+        private void CreateUVsNative(Mesh.MeshData data)
+        {
+            var uvs = data.GetVertexData<float2>(1);
+            int dim = meshInfo.map.GetMeshDimAtLOD(meshInfo.resolution);
+            int i = 0;
+
+            for (int z = 0; z < dim; ++z)
+            {
+                for (int x = 0; x < dim; ++x)
+                {
+                    uvs[i] = new float2(x * meshInfo.vertexScale, z * meshInfo.vertexScale);
+                    ++i;
+                }
+            }
+        }
+
+        private void SetVertexDescriptors()
+        {
+            // make temp vertex attribute descriptors for vertex position and UV streams
+            VertexAttributeDescriptor vertexPositionStream = new VertexAttributeDescriptor(VertexAttribute.Position, dimension: 3); // stream 0
+            VertexAttributeDescriptor vertexUvStream = new VertexAttributeDescriptor(VertexAttribute.TexCoord0, dimension: 2, stream: 1); // stream 1
+            int vertexAttributeCount = 2;
+        
+            // set up the mesh vertex attributes position stream and UV stream
+            meshVertexAttributes = new NativeArray<VertexAttributeDescriptor>(vertexAttributeCount, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
+            meshVertexAttributes[0] = vertexPositionStream;
+            meshVertexAttributes[1] = vertexUvStream;
         }
     }
 
@@ -609,7 +826,7 @@ public class MeshManager : MonoBehaviour
                 min: meshInfo.remapMin, 
                 max: meshInfo.remapMax, 
                 curve: meshInfo.terrainCurve, 
-                lod: meshInfo.lod
+                lod: meshInfo.resolution
             );
         }
     

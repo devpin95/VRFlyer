@@ -16,7 +16,10 @@ public class HelicopterControl : MonoBehaviour
 
     public Camera remoteCamera;
 
+    public float bladeRotationMultiplier = 2000;
+
     private GameObject heliPrefabInstance;
+    private Transform heliBladePivot;
     private Transform prefabForceMoment;
     private Transform prefabXRRigAnchor;
     private Transform prefabRemoteCameraAnchor;
@@ -33,7 +36,7 @@ public class HelicopterControl : MonoBehaviour
     private float _tiltForce;
 
     private bool _leveling = false;
-    private bool _hovering = true;
+    private bool _hovering = false;
     private float _hoveringHeight;
     private const float _hoveringVelocityThreshold = 0.03f;
     private float _hoverTransitionTime = 0f;
@@ -44,13 +47,19 @@ public class HelicopterControl : MonoBehaviour
     private Vector3 _lastVelocity;
 
     private int _fixedUpdateCounter = 0;
+
+    [SerializeField] private bool _helicopterActive = false;
     
     
     // Start is called before the first frame update
     void Start()
     {
         _rb = GetComponent<Rigidbody>();
-        _bc = GetComponent<BoxCollider>();
+        // _bc = GetComponent<BoxCollider>();
+
+        // make the rigidbody kinematic until the game ready event is called
+        // so that physics doesnt effect the helicopter while the game is loading
+        _rb.isKinematic = true;
         
         // recenter the hmd at the beginning of time
         List<InputDevice> devices = new List<InputDevice>();
@@ -65,6 +74,9 @@ public class HelicopterControl : MonoBehaviour
         heliPrefabInstance.transform.SetParent(transform);
         heliPrefabInstance.transform.localPosition = helicopterAttributes.offset;
         heliPrefabInstance.transform.localEulerAngles = helicopterAttributes.rotation;
+        
+        // get the helicopter blade pivot
+        heliBladePivot = heliPrefabInstance.transform.Find("Model").transform.Find("Blade Pivot").transform;
 
         // set some of the debug UI elements
         heliPrefabInstance.transform.Find("UI").GetComponent<HelicopterHUDController>().heliTransform = transform;
@@ -86,8 +98,8 @@ public class HelicopterControl : MonoBehaviour
         
         // set the rigid body and box collider values
         _rb.mass = helicopterAttributes.mass;
-        _bc.center = helicopterAttributes.boxColliderCenter;
-        _bc.size = helicopterAttributes.boxColliderSize;
+        // _bc.center = helicopterAttributes.boxColliderCenter;
+        // _bc.size = helicopterAttributes.boxColliderSize;
         
         _lastRotation = transform.rotation;
         _rotationVelocity = Vector3.zero;
@@ -99,11 +111,14 @@ public class HelicopterControl : MonoBehaviour
     {
         remoteCamera.transform.position = prefabRemoteCameraAnchor.position;
         remoteCamera.transform.rotation = prefabRemoteCameraAnchor.rotation;
+        
+        heliBladePivot.RotateAround(heliBladePivot.transform.position, heliBladePivot.transform.up, bladeRotationMultiplier * Time.deltaTime);
     }
 
     // Update is called once per frame
     void FixedUpdate()
     {
+        if (!_helicopterActive) return;
         _acceleration = (_rb.velocity - _lastVelocity) / Time.fixedDeltaTime;
         
         ApplyThrottle();
@@ -249,5 +264,19 @@ public class HelicopterControl : MonoBehaviour
         transform.position += v3;
         remoteCamera.transform.position = prefabRemoteCameraAnchor.position;
         remoteCamera.transform.rotation = prefabRemoteCameraAnchor.rotation;
+    }
+
+    public void GameReadyEvent()
+    {
+        Debug.Log("Helicopter ready to fly");
+        _rb.isKinematic = false;
+        _helicopterActive = true;
+    }
+
+    public void SpawnPointNotification(Vector3 spawnPoint)
+    {
+        Vector3 heliAttachPoint = heliPrefabInstance.transform.Find("Landing Point").transform.position;
+        Vector3 attachPointToTransPos = transform.position - heliAttachPoint;
+        transform.position = spawnPoint + attachPointToTransPos;
     }
 }

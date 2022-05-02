@@ -26,4 +26,9 @@ public class GameManager : MonoBehaviour
     {
         gameData.DataReady = false;
     }
+
+    public void TerrainReadyResponse()
+    {
+        Debug.Log("The terrain is ready, no we can do something else!");
+    }
 }

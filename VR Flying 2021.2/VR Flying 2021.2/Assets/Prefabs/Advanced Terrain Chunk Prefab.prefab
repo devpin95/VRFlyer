@@ -45,7 +45,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: bc8a1ab82baaa51468ec60f3e14130d4, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  recalculateLodDistance: 0
+  recalculateLodDistance: 200
   distanceFromPlayer: 0
   LOD: 6
   gridOffset: {x: 0, y: 0}

@@ -11,19 +11,22 @@ using static Unity.Mathematics.math;
 [BurstCompile]
 public struct BuildAdvancedMapJob : IJobParallelFor
 {
+    // variable - will change by job
     [WriteOnly] [NativeDisableParallelForRestriction] public NativeArray<float> map;
     [ReadOnly] public int dim;
     [ReadOnly] public int2 offset;
+    [ReadOnly] public int lod;
+    
+    // fixed - won't change between jobs
     [ReadOnly] public float chunkSize;
-
     [ReadOnly] public NativeArray<float> amplitudes; // 1/2^n
     [ReadOnly] public NativeArray<float> frequencies; // 2^n
     [ReadOnly] public float octaveMax; // sum of amplitudes
     
     public void Execute(int index)
     {
-        int y = index / dim; // integer division, we want the truncated int here
-        int x = index % dim; // we want the column of the current row
+        int y = (index / dim) * lod; // integer division, we want the truncated int here
+        int x = (index % dim) * lod; // we want the column of the current row
         map[index] = SamplePerlinNoise(new int2(x, y));
     }
 
