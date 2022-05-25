@@ -2,8 +2,8 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.Serialization;
 
-[CreateAssetMenu(menuName = "Terrain Obj")]
 public class TerrainInfo : ScriptableObject
 {
     [Header("World Info")] 
@@ -27,7 +27,7 @@ public class TerrainInfo : ScriptableObject
     public List<LODInfo> lods = new List<LODInfo>();
     public float cullDistance;
     public float heightCullDistance = 1000;
-    
+
     [Serializable]
     public struct LODInfo
     {

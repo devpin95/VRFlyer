@@ -13,7 +13,9 @@ GameObject:
   - component: {fileID: 1636051442178952415}
   - component: {fileID: 5320032185955347277}
   - component: {fileID: 2909924042317914328}
+  - component: {fileID: -3348158756655837304}
   - component: {fileID: 3236955378112800279}
+  - component: {fileID: -416132768084272266}
   m_Layer: 7
   m_Name: Terrain Chunk Prefab
   m_TagString: Untagged
@@ -113,8 +115,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   terrainInfo: {fileID: 11400000, guid: b1250039d21d1184fb76147301e5c608, type: 2}
-  previousGridOffset: {x: 0, y: 0}
-  gridOffset: {x: -100000000, y: -100000000}
+  gpsInfo: {fileID: 11400000, guid: c0e72620001c4414fb81766bb7cf80ce, type: 2}
   worldOffset: {x: -100000000, y: -100000000}
   LOD: 6
   recalculateLodDistance: 25
@@ -125,7 +126,29 @@ MonoBehaviour:
   normalMapTex: {fileID: 0}
   initialGenerationEvent: {fileID: 11400000, guid: 97561b8cdef22ed4cac21b77165ade56, type: 2}
   helipadSpawnPointNotification: {fileID: 11400000, guid: c1be19fad368f104b88fc045b67bbc76, type: 2}
+  gpsImageNotification: {fileID: 11400000, guid: 2060947fdc3498848a0f24c46bf73949, type: 2}
+  gpsIconNotification: {fileID: 11400000, guid: 7c663bb0fa8caf644b37c9f543136d49, type: 2}
+  gpsDestinationNotification: {fileID: 11400000, guid: d23d5713cfefaca4c9c4c267ad0df33c, type: 2}
   img: {fileID: 0}
+  atCullDistance: 0
+  beneathCullHeight: 0
+  culled: 0
+--- !u!114 &-3348158756655837304
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 7393195159491590428}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 87ddd47f6e987cb4ab3db1f9ad834158, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  terrainInfo: {fileID: 11400000, guid: b1250039d21d1184fb76147301e5c608, type: 2}
+  vegetationInfo: {fileID: 11400000, guid: 64a22d31d4b237445a394a28f43c9b6a, type: 2}
+  cullDistance: 500
+  activeChunkCount: 0
 --- !u!114 &3236955378112800279
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -145,6 +168,34 @@ MonoBehaviour:
       - m_Target: {fileID: 2909924042317914328}
         m_TargetAssemblyTypeName: MeshManager, Assembly-CSharp
         m_MethodName: Reposition
+        m_Mode: 0
+        m_Arguments:
+          m_ObjectArgument: {fileID: 0}
+          m_ObjectArgumentAssemblyTypeName: UnityEngine.Object, UnityEngine
+          m_IntArgument: 0
+          m_FloatArgument: 0
+          m_StringArgument: 
+          m_BoolArgument: 0
+        m_CallState: 2
+--- !u!114 &-416132768084272266
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 7393195159491590428}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 2ef3f2927939ecb4bbfcc7a2f2b0984e, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  Event: {fileID: 11400000, guid: c1be19fad368f104b88fc045b67bbc76, type: 2}
+  Response:
+    m_PersistentCalls:
+      m_Calls:
+      - m_Target: {fileID: -3348158756655837304}
+        m_TargetAssemblyTypeName: VegetationManager, Assembly-CSharp
+        m_MethodName: SpawnPointResponse
         m_Mode: 0
         m_Arguments:
           m_ObjectArgument: {fileID: 0}

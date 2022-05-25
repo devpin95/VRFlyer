@@ -125,9 +125,33 @@ public class TerrainMap
         return heightmap[x, y];
     }
 
-    public void RequestMapJob(Vector2 offset, float chunkSize, int octaves = 5)
+    public float SampleAndScaleHeightMap(int x, int z, AnimationCurve curve, float remapmin, float remapmax)
     {
+        float y = heightmap[x, z]; // get the height map value [0, 1]
+        y = curve.Evaluate(y); // evaluate it on the curve
+        y = Utilities.Remap(y, 0, 1, remapmin, remapmax); // remap to [min, max]
+        return y;
+    }
+    
+    public Vector2 SampleAndScaleHeightMap(float x, float z, AnimationCurve curve, float remapmin, float remapmax)
+    {
+        // returns a vector2 of the map samples
+        // vector2.x is the height map value [0,1]
+        // vector2.y is the scaled map value [remapmin, remapmax]
         
+        Vector2 samples = Vector2.zero;
+        
+        // BiLerp the point using the terrain map
+        // then evaluate the height on the terrain curve
+        // then remap the value to the min/max terrain heights
+        float lerpHeight = Utilities.BiLerp(x, z, heightmap);
+        float height = curve.Evaluate(lerpHeight);
+        float y = Utilities.Remap(height, 0, 1, remapmin, remapmax);
+
+        samples.x = height;
+        samples.y = y;
+        
+        return samples;
     }
 
     public float[,] GenerateMap(Vector2 offset, float chunkSize, float min, float max, int octaves = 5)
@@ -195,27 +219,7 @@ public class TerrainMap
     {
         return Utilities.Flatten2DArray(heightmap, mapverts, mapverts);
     }
-    
-    public float[] GetRemappedFlattenedHeightMap(float min, float max)
-    {
-        float[,] remapped = Get2DHeightMapRemapped(min, max);
-        return Utilities.Flatten2DArray(remapped, mapverts, mapverts);
-    }
 
-    public Vector3[] GetFlattenedVector3VertMap(float vertScale)
-    {
-        Vector3[,] vectormap = new Vector3[mapverts, mapverts];
-        for (int z = 0; z < mapverts; ++z)
-        {
-            for (int x = 0; x < mapverts; ++x)
-            {
-                vectormap[x, z] = new Vector3(x * vertScale, heightmap[x, z], z * vertScale);
-            }
-        }
-
-        return Utilities.Flatten2DArray(vectormap, mapverts, mapverts);
-    }
-    
     public Vector3[] GetRemappedFlattenedVectorMap(float vertScale, float min, float max, AnimationCurve curve, int lod = 1)
     {
         AnimationCurve animCurve = new AnimationCurve(curve.keys);
@@ -244,10 +248,8 @@ public class TerrainMap
     public void GetVectorMapNative(ref NativeArray<float3> nativeMap, float vertScale, float min, float max, AnimationCurve curve, int lod = 1)
     {
         AnimationCurve animCurve = new AnimationCurve(curve.keys);
-
-        int lodWidth = mapsquares / lod + 1;
         
-        Debug.Log("LOD " + lod + " mesh has width " + lodWidth + " and area " + lodWidth * lodWidth);
+        // Debug.Log("LOD " + lod + " mesh has width " + lodWidth + " and area " + lodWidth * lodWidth);
         
         int vertIndex = 0;
         for (int z = 0; z < mapverts; z += lod)
@@ -283,14 +285,14 @@ public class TerrainMap
     public Texture2D GetHeightMapTexture2D(AnimationCurve curve = null)
     {
         if (curve == null) curve = defaultHeightCurve;
-        
+
         float[] flatmap = GetFlattenedHeightMap();
         Color[] colormap = new Color[heightmap.Length];
 
-        for (int i = 0; i < flatmap.Length; ++i)
+        for (int i = 0; i < heightmap.Length; ++i)
         {
             float curvedValue = curve.Evaluate(flatmap[i]);
-            colormap[i] = new Color(curvedValue, curvedValue, curvedValue, 1);
+            colormap[i] = new Color(0, curvedValue, 0, 1);
         }
         
         Texture2D heightMapTex = new Texture2D(mapverts, mapverts);
@@ -340,16 +342,53 @@ public class TerrainMap
         return normalmap;
     }
 
-    public Texture2D GetAltitudeMap(float altitude, Func<float, float, bool> comp)
+    public Texture2D GetAltitudeMap(float altitude, Func<float, float, bool> comp, Color color1, Color color2)
     {
         float[] flatmap = GetFlattenedHeightMap();
         Color[] colormap = new Color[heightmap.Length];
 
         for (int i = 0; i < heightmap.Length; ++i)
         {
-            if ( comp(flatmap[i], altitude) ) colormap[i] = new Color(1, 1, 1, 1);
-            else colormap[i] = new Color(0, 0, 0, 1);
+            if ( comp(flatmap[i], altitude) ) colormap[i] = color1;
+            else colormap[i] = color2;
         }
+        Texture2D altitudeMapTex = new Texture2D(mapverts, mapverts);
+        altitudeMapTex.SetPixels(colormap);
+        altitudeMapTex.Apply();
+
+        return altitudeMapTex;
+    }
+
+    public Texture2D GetAltitudeMap(List<GPSInfo.GPSHeightLevel> levels)
+    {
+        float[] flatmap = GetFlattenedHeightMap();
+        Color[] colormap = new Color[heightmap.Length];
+
+        int lowest = (int)minypos.x + (int)minypos.y * mapverts;
+
+        for (int i = 0; i < heightmap.Length; ++i)
+        {
+            int y = i / mapverts; // integer division, we want the truncated int here
+            int x = i % mapverts; // we want the column of the current row
+
+            if (i == lowest)
+            {
+                colormap[i] = Color.black;
+                continue;
+            }
+            
+            for (int j = 0; j < levels.Count; ++j)
+            {
+                if (flatmap[i] < levels[j].height)
+                {
+                    colormap[i] = levels[j].color;
+                    break;
+                }
+            }
+
+            colormap[i] = GPSController.PreProcessMapImage(x, y, mapverts, mapverts, colormap[i]);
+        }
+        
         Texture2D altitudeMapTex = new Texture2D(mapverts, mapverts);
         altitudeMapTex.SetPixels(colormap);
         altitudeMapTex.Apply();
@@ -575,7 +614,7 @@ public class TerrainMap
     // -----------------------------------------------------------------------------------------------------------------
     // -----------------------------------------------------------------------------------------------------------------
     
-    public static Vector3 ScaleMapPosition(Vector3 mapPos, float vertScale, AnimationCurve curve, float remapMin, float remapMax)
+    public static Vector3 ScaleMapPosition(Vector3 mapPos, int verts, float vertScale, AnimationCurve curve, float remapMin, float remapMax, IntVector2 gridOffset)
     {
         float height = curve.Evaluate(mapPos.y);
         height = Utilities.Remap(height, 0, 1, remapMin, remapMax);
@@ -642,8 +681,6 @@ public class TerrainMap
             
             // generate octave frequencies and amplitudes of doing octave noise
             Noise.OctaveData octaveData = Noise.GenerateOctaveData(generationInput.octaves);
-            
-            Debug.Log("Octave data for this thread: Amplitudes[" + Utilities.ArrayToString(octaveData.Amplitudes) + "], Frequencies[" + Utilities.ArrayToString(octaveData.Frequencies) + "], " + octaveData.MAXSampleValue);
 
             // init the min and max values so we can remap later
             output.max = float.MinValue;

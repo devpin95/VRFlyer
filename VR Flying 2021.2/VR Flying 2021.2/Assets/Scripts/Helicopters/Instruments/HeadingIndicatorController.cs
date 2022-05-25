@@ -17,6 +17,6 @@ public class HeadingIndicatorController : MonoBehaviour
     {
         float heading = instrumentInputs.HeliTransform.rotation.eulerAngles.y;
         headingIndicator.localRotation = Quaternion.Euler(0, 0, heading);
-        headingReading.text = "Heading: " + heading.ToString("n2");
+        
     }
 }

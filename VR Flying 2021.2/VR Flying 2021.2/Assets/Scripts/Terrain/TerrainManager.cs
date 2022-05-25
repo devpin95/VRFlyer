@@ -219,7 +219,7 @@ public class TerrainManager : MonoBehaviour
                 if ( meshManager == null ) Debug.LogWarning("No object returned from pool");
                     
                 meshManager.SetRepositionOffset(totalWorldOffset); // set the reposition offset for this chunk so that it can be positioned properly
-                meshManager.SetGridPosition(new Vector2(coord.x, coord.y)); // set the grid coordinate for this chunk
+                meshManager.SetGridPosition(new IntVector2(coord.x, coord.y)); // set the grid coordinate for this chunk
                 // meshManager.EnableRenderer(); // make sure that the renderer is re-enabled if it was off
                 // meshManager.SetLod(0);
 

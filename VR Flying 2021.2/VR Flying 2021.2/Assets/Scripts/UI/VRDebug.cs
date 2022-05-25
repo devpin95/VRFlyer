@@ -6,6 +6,9 @@ using UnityEngine.UI;
 
 public class VRDebug : MonoBehaviour
 {
+    public TextMeshProUGUI fpsText;
+    private float _deltaTime = 0;
+    
     public int maxLogDisplay = 5;
     [SerializeField] private int logCount = 0;
     [SerializeField] private int displayCount = 0;
@@ -89,6 +92,19 @@ public class VRDebug : MonoBehaviour
                     --displayCount;
                 }
             }
+        }
+
+        if (fpsText != null)
+        {
+            _deltaTime += (Time.deltaTime - _deltaTime) * 0.1f;
+            float fps = 1.0f / _deltaTime;
+            fps = Mathf.Ceil(fps);
+            fpsText.text = fps.ToString("n2");
+
+            if (fps < 60) fpsText.color = errorColor;
+            if (fps < 70) fpsText.color = warningColor;
+            else if (fps <= 80) fpsText.color = logColor;
+            
         }
     }
 

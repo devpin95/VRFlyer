@@ -64,3 +64,17 @@ MonoBehaviour:
     distance: 26000
   cullDistance: 38000
   heightCullDistance: 9450
+  gpsLevels:
+  - height: 0.375
+    color: {r: 0.7311321, g: 1, b: 0.7311321, a: 1}
+  - height: 0.5
+    color: {r: 0, g: 0.8490566, b: 0, a: 1}
+  - height: 0.65
+    color: {r: 0, g: 0.6886792, b: 0, a: 1}
+  - height: 1
+    color: {r: 1, g: 0.933393, b: 0.8160377, a: 1}
+  vegetationGridSize: 20
+  treeCountPerGrid: 500
+  heightCutoff: 0.35
+  vegetationCullDistance: 1500
+  tree1Prefab: {fileID: 8835916286867359205, guid: 1a894cbe5f37afb4c866427d69d2289e, type: 3}

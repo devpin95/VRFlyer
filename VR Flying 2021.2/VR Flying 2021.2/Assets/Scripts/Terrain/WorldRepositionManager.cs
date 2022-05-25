@@ -56,4 +56,9 @@ public class WorldRepositionManager : MonoBehaviour
         Vector3 offset = -playerTransform.position;
         worldRepositionEvent.Raise(offset);
     }
+
+    public Vector3 UnitySpaceToWorldSpace(Vector3 unityPos)
+    {
+        return new Vector3(unityPos.x, unityPos.y + terrainInfo.baseAltitude, unityPos.z);
+    }
 }

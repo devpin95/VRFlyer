@@ -17,6 +17,8 @@ public class HelicopterControl : MonoBehaviour
     public Camera remoteCamera;
 
     public float bladeRotationMultiplier = 2000;
+    private float _engineSpeed = 1;
+    private float _throttleSpeed = 1;
 
     private GameObject heliPrefabInstance;
     private Transform heliBladePivot;
@@ -112,7 +114,7 @@ public class HelicopterControl : MonoBehaviour
         remoteCamera.transform.position = prefabRemoteCameraAnchor.position;
         remoteCamera.transform.rotation = prefabRemoteCameraAnchor.rotation;
         
-        heliBladePivot.RotateAround(heliBladePivot.transform.position, heliBladePivot.transform.up, bladeRotationMultiplier * Time.deltaTime);
+        heliBladePivot.RotateAround(heliBladePivot.transform.position, heliBladePivot.transform.up, _engineSpeed * _throttleSpeed * bladeRotationMultiplier * Time.deltaTime);
     }
 
     // Update is called once per frame
@@ -163,20 +165,6 @@ public class HelicopterControl : MonoBehaviour
             Vector3 hoverForce = Vector3.up * force; // set the force in the upward direction
             
             _rb.AddRelativeForce(hoverForce, ForceMode.Force);
-
-            // if (yVel < -_hoveringVelocityThreshold)
-            // {
-            //     _rb.AddRelativeForce(Vector3.up * ((_rb.mass * Math.Abs(Physics.gravity.y) + 100 * -yVel * angle * 2)) * transitionStep, ForceMode.Force);
-            // }
-            // else if (yVel > _hoveringVelocityThreshold)
-            // {
-            //     _rb.AddRelativeForce(Vector3.up * ((_rb.mass * Math.Abs(Physics.gravity.y) - 100 * yVel * angle * 2))  * transitionStep, ForceMode.Force);
-            // }
-            // else
-            // {
-            //     ascendForce *= _rb.mass * Math.Abs(Physics.gravity.y);
-            //     _rb.AddForce(ascendForce, ForceMode.Force);
-            // }
         }
         else
         {
@@ -221,6 +209,7 @@ public class HelicopterControl : MonoBehaviour
     {
         float val = ctx.ReadValue<float>();
         _mainThrottle = val * helicopterAttributes.ascendPower;
+        _throttleSpeed = val + 1f; // shift the value up to [1, 2]
         _hovering = false;
     }
 
