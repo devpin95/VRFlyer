@@ -20,6 +20,7 @@ public class MeshManager : MonoBehaviour
     public TerrainInfo terrainInfo;
     public GPSInfo gpsInfo;
     private VegetationManager _vegetationManager;
+    private ProceduralSeed _procSeed;
     
     private Mesh _mesh;
     private Vector3[] _vertices;
@@ -28,22 +29,14 @@ public class MeshManager : MonoBehaviour
     private Vector2[] _uvs;
 
     [Header("Mesh")]
-    // public int meshSquares = 239;
-    // public int meshVerts = 240;
     public IntVector2 previousGridOffset;
     public IntVector2 gridOffset;
-    public Vector2 worldOffset;
-    // [FormerlySerializedAs("offsetScale")] public float chunkSize = 5;
-    // public float vertexScale = 1;
-    // public AnimationCurve terrainCurve;
+    public IntVector2 worldOffset;
     [Range(-1, 6)]
     public int LOD;
 
     [Header("Terrain")] 
     private GameObject _structureContainer;
-    // public int noiseOctaves = 5;
-    // public float remapMin = -500;
-    // public float remapMax = 500;
 
     [Header("LOD Distances")] 
     private Transform playerTransform;
@@ -123,6 +116,8 @@ public class MeshManager : MonoBehaviour
     public bool atCullDistance;
     public bool beneathCullHeight;
     public bool culled = false;
+    private bool _switchingLODs = false;
+    private IEnumerator _delayedLODDisable;
 
     // Start is called before the first frame update
     void Awake()
@@ -160,6 +155,9 @@ public class MeshManager : MonoBehaviour
         _structureContainer.transform.name = "Structures";
 
         _vegetationManager = GetComponent<VegetationManager>();
+        
+        _delayedLODDisable = DelayedLODDisable(_meshLODs[LOD].instance);
+        _procSeed = GetComponent<ProceduralSeed>();
     }
 
     private void Start()
@@ -210,55 +208,80 @@ public class MeshManager : MonoBehaviour
     private void FindNewLOD()
     {
         // loop through all of the LODs and determine which LOD we need to target
-            // loop backwards and if the player distance is greater than any LOD distance, we know the mesh needs
-            // to be at the LOD
-            bool lodChange = false;
-            int targetLOD = terrainInfo.lods[terrainInfo.lods.Count - 1].lod;
-            for (int i = terrainInfo.lods.Count - 1; i >= -1; --i)
+        // loop backwards and if the player distance is greater than any LOD distance, we know the mesh needs
+        // to be at the LOD
+        bool lodChange = false;
+        int targetLOD = terrainInfo.lods[terrainInfo.lods.Count - 1].lod;
+        for (int i = terrainInfo.lods.Count - 1; i >= -1; --i)
+        {
+            // if we loop through all of the LODs and havent found one, then we are close enough for the highest LOD
+            if (i == -1)
             {
-                // if we loop through all of the LODs and havent found one, then we are close enough for the highest LOD
-                if (i == -1)
-                {
-                    targetLOD = 0;
-                    lodChange = true;
-                    break;
-                }
-                
-                // if we after further away that the LOD distance, we must need to use this LOD
-                if (distanceFromPlayer > terrainInfo.lods[i].distance)
-                {
-                    targetLOD = terrainInfo.lods[i].lod;
-                    lodChange = true;
-                    break;
-                }
+                targetLOD = 0;
+                lodChange = true;
+                break;
             }
             
-            // only swap our LOD if we actually need to swap to a different LOD
-            if (targetLOD != LOD && lodChange)
+            // if we after further away that the LOD distance, we must need to use this LOD
+            if (distanceFromPlayer > terrainInfo.lods[i].distance)
             {
-                int oldLOD = LOD;
-                LOD = targetLOD;
-
-                if (_initializedMeshes[LOD])
-                {
-                    // the mesh at the target LOD has already been generated, so we dont need to regenerate it
-                    SwapLODMesh(oldLOD, LOD);
-                }
-                else
-                {
-                    //disable the old mesh
-                    if ( _meshLODs[oldLOD].instance ) _meshLODs[oldLOD].instance?.SetActive(false);
-
-                    // set up a stub of the information we would have gotten from the map generation thread
-                    TerrainMap.MapGenerationOutput meshGenerationInfoStub = new TerrainMap.MapGenerationOutput();
-                    meshGenerationInfoStub.map = _terrainMap.Get2DHeightMap();
-                    meshGenerationInfoStub.min = _terrainMap.MapMin();
-                    meshGenerationInfoStub.max = _terrainMap.MapMax();
-
-                    // call the function to start the mesh generation thread
-                    MapGenerationReceived(meshGenerationInfoStub, true);   
-                }
+                targetLOD = terrainInfo.lods[i].lod;
+                lodChange = true;
+                break;
             }
+        }
+        
+        // only swap our LOD if we actually need to swap to a different LOD
+        if (targetLOD != LOD && lodChange)
+        {
+            int oldLOD = LOD;
+            LOD = targetLOD;
+
+            if (_initializedMeshes[LOD])
+            {
+                // the mesh at the target LOD has already been generated, so we dont need to regenerate it
+                SwapLODMesh(oldLOD, LOD);
+            }
+            else
+            {
+                // set up a stub of the information we would have gotten from the map generation thread
+                TerrainMap.MapGenerationOutput meshGenerationInfoStub = new TerrainMap.MapGenerationOutput();
+                meshGenerationInfoStub.map = _terrainMap.Get2DHeightMap();
+                meshGenerationInfoStub.min = _terrainMap.MapMin();
+                meshGenerationInfoStub.max = _terrainMap.MapMax();
+                meshGenerationInfoStub.attributes = _terrainMap.generatedAttributes;
+
+                // call the function to start the mesh generation thread
+                MapGenerationReceived(meshGenerationInfoStub, true);   
+                
+                //disable the old mesh
+                // if ( _meshLODs[oldLOD].instance ) _meshLODs[oldLOD].instance?.SetActive(false);
+                
+                _switchingLODs = true;
+                _delayedLODDisable = DelayedLODDisable(_meshLODs[oldLOD].instance);
+                // if (startup)
+                // {
+                //     _meshLODs[oldLOD].instance?.SetActive(false);
+                // }
+                // else
+                // {
+                //     _delayedLODDisable = DelayedLODDisable(_meshLODs[oldLOD].instance);
+                //     // StartCoroutine(_delayedLODDisable);
+                // }
+            }
+        }
+    }
+
+    private IEnumerator DelayedLODDisable(GameObject obj)
+    {
+        if ( obj == null ) yield break;
+        
+        // Debug.Log("Disabling old LOD");
+        
+        // yield return new WaitUntil(() => !_switchingLODs);
+        obj.SetActive(false);
+        _switchingLODs = false; // make sure it is false
+        _delayedLODDisable = null;
     }
 
     public void ForceLODCheck()
@@ -298,14 +321,24 @@ public class MeshManager : MonoBehaviour
     {
         _terrainMap.InitMap(terrainInfo.meshVerts);
         
-        Vector2 nworldOffset = new Vector2(gridOffset.x, gridOffset.y);
+        IntVector2 nworldOffset = new IntVector2(gridOffset.x, gridOffset.y);
 
         if (_gameData)
-            nworldOffset = new Vector2(gridOffset.x + _gameData.PerlinOffset.x, gridOffset.y + _gameData.PerlinOffset.y);
+            nworldOffset = new IntVector2(gridOffset.x + _gameData.PerlinOffset.x, gridOffset.y + _gameData.PerlinOffset.y);
         
         worldOffset = nworldOffset;
 
-        _terrainMap.RequestMap(nworldOffset, terrainInfo.chunkSize, callback: MapGenerationReceived, _mapThreadResultQueue, octaves: terrainInfo.noiseOctaves);
+        _procSeed.InitState(RNGSalt());
+        _terrainMap.SetTerrainAttribute(TerrainMap.TerrainAttributes.HAS_LAKE, _procSeed.Range(0f, 1f) < terrainInfo.pLakeSpawn);
+        _terrainMap.SetTerrainAttribute(TerrainMap.TerrainAttributes.HAS_SPLIT_LAKE, false);
+        _terrainMap.SetTerrainAttribute(TerrainMap.TerrainAttributes.HAS_TOWN, false);
+
+        _terrainMap.nonContributingBiomes = terrainInfo.GetNonContributingBiomes();
+        _terrainMap.contributingBiomes = terrainInfo.GetContributingBiomes();
+        _terrainMap.offset = nworldOffset;
+        _terrainMap.maxHeight = terrainInfo.MaxTerrainHeight();
+        
+        _terrainMap.RequestMap( callback: MapGenerationReceived, _mapThreadResultQueue);
     }
 
     private void MapGenerationReceived(TerrainMap.MapGenerationOutput output, bool stub = false)
@@ -313,46 +346,42 @@ public class MeshManager : MonoBehaviour
         StartCoroutine(MapGenerationCoroutine(output, stub));
     }
 
-    IEnumerator MapGenerationCoroutine(TerrainMap.MapGenerationOutput output, bool stub = false)
+    IEnumerator MapGenerationCoroutine(TerrainMap.MapGenerationOutput mapGenerationOutput, bool stub = false)
     {
         if (!stub)
         {
-            _terrainMap.SetMap(output.map, output.min, output.max, output.minpos, output.maxpos);
-            // yield return null;
-            // heightMapTex = _terrainMap.GetHeightMapTexture2D();
-            // yield return null;
-            // altitudeMapTex = _terrainMap.GetAltitudeMap(terrainInfo.altitudeCutoff, TerrainMap.ALTITUDE_BELOW, terrainInfo.lowAltitudeColor, terrainInfo.highAltitudeColor);
-            // yield return null;
-            // normalMapTex = _terrainMap.GetNormalMapTex2D(terrainInfo.remapMin, terrainInfo.remapMax);
+            // if we get in here, then the caller of this function was the thread that generated the map
+            // NOT the manager wanting a new LOD of the same map
+            _terrainMap.SetMap(mapGenerationOutput.map, mapGenerationOutput.min, mapGenerationOutput.max, mapGenerationOutput.minpos, mapGenerationOutput.maxpos);
+            _terrainMap.mean = mapGenerationOutput.mean;
+            _terrainMap.variance = mapGenerationOutput.variance;
+            _terrainMap.stdDev = mapGenerationOutput.stdDev;
+            _terrainMap.generatedAttributes = mapGenerationOutput.attributes;
+         
+            if (mapGenerationOutput.attributes[(int)TerrainMap.TerrainAttributes.HAS_LAKE])
+            {
+                Debug.Log(transform.name + " has generated a lake");
+            }
         }
 
         yield return null;
         
-
+        // Debug.Log(transform.name + " average height: " + output.mean);
+        
         // set up the mesh generation input
         int meshDim = (terrainInfo.meshVerts - 1) / LODUtility.LODToMeshResolution(LOD) + 1;
         MeshGenerationInput meshGenerationInput = new MeshGenerationInput(
             _terrainMap, 
             meshDim, 
             terrainInfo.vertexScale, 
-            terrainInfo.remapMin, 
-            terrainInfo.remapMax, 
+            0, 
+            terrainInfo.MaxTerrainHeight(), 
             terrainInfo.terrainCurve, 
             LODUtility.LODToMeshResolution(LOD),
             ref _meshDataArray);
 
         yield return null;
 
-        // ** IJob **
-        // -------------------------------------------------------------------------------------------------------------
-        // MeshBuilderIJob builderIJob = new MeshBuilderIJob();
-        // builderIJob.meshInfo = meshGenerationInput;
-        // builderIJob.callback = MeshGenerationReceived;
-        // builderIJob.resultQ = _meshThreadResultQueue;
-        //
-        // JobHandle jobHandle = builderIJob.Schedule();
-        // jobHandle.Complete();
-        
         // ** thread pool **
         // -------------------------------------------------------------------------------------------------------------
         // // make the new builder thread object with the input, the output queue, and the callback we need to invoke
@@ -365,15 +394,15 @@ public class MeshManager : MonoBehaviour
         yield return null;
     }
     
-    private void MeshGenerationReceived(MeshGenerationOutput generationOutput, bool reposition = true)
+    private void MeshGenerationReceived(MeshGenerationOutput meshGenerationOutput, bool reposition = true)
     {
-        StartCoroutine(MeshGenerationCoroutine(generationOutput));
+        StartCoroutine(MeshGenerationCoroutine(meshGenerationOutput));
     }
 
     IEnumerator MeshGenerationCoroutine(MeshGenerationOutput generationOutput)
     {
         int targetLod = generationOutput.targetLod; // make a copy of this so everything is easier to read later
-        
+
         // if the mesh hasnt been created, create it
         // if the mesh is already created, then clear it so we can update it with the new heightmap
         if (_meshLODs[targetLod].instance == null) CreateMeshLODGameObject(targetLod);
@@ -408,9 +437,13 @@ public class MeshManager : MonoBehaviour
         _meshLODs[targetLod].meshFilter.sharedMesh = _meshLODs[targetLod].mesh;
             
         yield return null;
-        
-        _meshLODs[targetLod].meshCollider.sharedMesh = _meshLODs[targetLod].mesh;
-        
+
+        // only set the mesh collider for the highest LOD
+        if (targetLod == 0)
+        {
+            _meshLODs[targetLod].meshCollider.sharedMesh = _meshLODs[targetLod].mesh;
+        }
+
         yield return null;
         
         // position the mesh where it needs to go in grid and world space
@@ -428,6 +461,12 @@ public class MeshManager : MonoBehaviour
         // set the flag for this lod to true to indicate that this LOD has been generated
         _initializedMeshes[generationOutput.targetLod] = true;
 
+        _switchingLODs = false;
+        if (!startup && _delayedLODDisable != null)
+        {
+            yield return _delayedLODDisable;
+        }
+        
         // if we built at a new grid position, do these things once instead of for each LOD
         if (newGridPos)
         {
@@ -440,7 +479,7 @@ public class MeshManager : MonoBehaviour
         {
             yield return _vegetationManager.GenerateVegetation(_terrainMap);
         }
-        
+
         if (startup)
         {
             initialGenerationEvent.Raise();
@@ -465,8 +504,10 @@ public class MeshManager : MonoBehaviour
     private void CalculateBounds()
     {
         float width = terrainInfo.meshVerts * terrainInfo.vertexScale;
-        float miny = _terrainMap.MapMinRemapped(terrainInfo.remapMin, terrainInfo.remapMax, terrainInfo.terrainCurve);
-        float maxy = _terrainMap.MapMaxRemapped(terrainInfo.remapMin, terrainInfo.remapMax, terrainInfo.terrainCurve);
+        float miny = 0;
+        float maxy = terrainInfo.MaxTerrainHeight();
+        // float miny = _terrainMap.MapMinRemapped(terrainInfo.remapMin, terrainInfo.remapMax, terrainInfo.terrainCurve);
+        // float maxy = _terrainMap.MapMaxRemapped(terrainInfo.remapMin, terrainInfo.remapMax, terrainInfo.terrainCurve);
         float ydelta = maxy - miny;
         float verticalCenter = miny + (maxy - miny) / 2;
         Vector3 center = new Vector3(transform.position.x + width / 2, verticalCenter / 2, transform.position.z + width / 2);
@@ -481,7 +522,7 @@ public class MeshManager : MonoBehaviour
         else
         {
             // if within helipad spawn probability, spawn a helipad at the lowest point of the chunk
-            if (Random.Range(0f, 1f) < _gameData.pHelipadSpawn) BuildHelipad();
+            if (_procSeed.RangeSingle(0f, 1f, RNGSalt()) < terrainInfo.pHelipadSpawn) BuildHelipad();
         }
     }
 
@@ -489,8 +530,8 @@ public class MeshManager : MonoBehaviour
     {
         // Texture2D map = _terrainMap.GetAltitudeMap(terrainInfo.altitudeCutoff, TerrainMap.ALTITUDE_BELOW, terrainInfo.lowAltitudeColor, terrainInfo.highAltitudeColor);
         Texture2D map = _terrainMap.GetAltitudeMap(gpsInfo.gpsLevels);
-        
         gpsImageNotification.Raise(map, gridOffset);
+        _terrainMap.GetDebugBiomeMaps(terrainInfo.biomes, gridOffset);
     }
 
     private void GridOriginStructures()
@@ -512,7 +553,8 @@ public class MeshManager : MonoBehaviour
         HelipadConstructionData data;
         
         Vector3 lowestPoint = _terrainMap.MapMinPosition();
-        Vector3 localPosition = TerrainMap.ScaleMapPosition(lowestPoint, terrainInfo.meshVerts, terrainInfo.vertexScale, terrainInfo.terrainCurve, terrainInfo.remapMin, terrainInfo.remapMax, gridOffset);
+        Vector3 localPosition = TerrainMap.ScaleMapPosition(lowestPoint, terrainInfo.vertexScale, terrainInfo.MaxTerrainHeight());
+        // Vector3 localPosition = TerrainMap.ScaleMapPosition(lowestPoint, terrainInfo.meshVerts, terrainInfo.vertexScale, terrainInfo.terrainCurve, terrainInfo.remapMin, terrainInfo.remapMax, gridOffset);
 
         // Debug.Log(transform.name + " helipad at " + lowestPoint + " has local position " + localPosition);
         
@@ -537,12 +579,17 @@ public class MeshManager : MonoBehaviour
         // create a gps destination and notify the GPS
         GPSGUI.GPSDestination destination = new GPSGUI.GPSDestination();
         destination.icon = GPSGUI.IconTypes.Helipad;
-        destination.name = (gridOffset == IntVector2.zero ? "Home" : "Pad " + Random.Range(0, 1000));
+        destination.name = (gridOffset == IntVector2.zero ? "Home" : "Pad " + _procSeed.RangeSingle(0, 1000,RNGSalt()));
         destination.preset = gridOffset == IntVector2.zero; // if at the origin, make this helipad a preset
         destination.worldPos = _worldRepositionManager.UnitySpaceToWorldSpace(helipadInstance.transform.position);
         gpsDestinationNotification.Raise(destination);
 
         return data;
+    }
+
+    private int RNGSalt()
+    {
+        return (gridOffset.x + gridOffset.y + gridOffset.x % 897 + gridOffset.y % 315);
     }
 
     public void Reposition(Vector3 offset)
@@ -707,14 +754,15 @@ public class MeshManager : MonoBehaviour
         private void CreateVertsNative(Mesh.MeshData data)
         {
             var vertdata = data.GetVertexData<float3>();
-            meshInfo.map.GetVectorMapNative(
-                nativeMap: ref vertdata,
-                vertScale: meshInfo.vertexScale, 
-                min: meshInfo.remapMin, 
-                max: meshInfo.remapMax, 
-                curve: meshInfo.terrainCurve, 
-                lod: meshInfo.resolution
-            );
+            // meshInfo.map.GetVectorMapNative(
+            //     nativeMap: ref vertdata,
+            //     vertScale: meshInfo.vertexScale, 
+            //     min: meshInfo.remapMin, 
+            //     max: meshInfo.remapMax, 
+            //     curve: meshInfo.terrainCurve, 
+            //     lod: meshInfo.resolution
+            // );
+            meshInfo.map.GetVectorMapNative(nativeMap: ref vertdata, meshInfo.vertexScale, meshInfo.remapMax, meshInfo.resolution);
         }
     
         private void CreateTris()
@@ -900,59 +948,79 @@ public class MeshManager : MonoBehaviour
         
         Gizmos.color = Color.red;
         Gizmos.DrawWireCube(_meshBounds.center, _meshBounds.size);
-    }
-}
 
-[CustomEditor(typeof(MeshManager))]
-public class SomeScriptEditor : Editor 
-{
-    MeshManager manager;
-    private SerializedProperty gridOffset;
-    private SerializedProperty heightMapSprite;
-    private SerializedProperty debugImg;
-    private SerializedProperty heightMapTex;
-    private SerializedProperty altitudeTex;
-    private SerializedProperty normalTex;
-
-    void OnEnable()
-    {
-        gridOffset = serializedObject.FindProperty("gridOffset");
-        heightMapSprite = serializedObject.FindProperty("_heightMapSprite");
-        debugImg = serializedObject.FindProperty("img");
-        heightMapTex = serializedObject.FindProperty("heightMapTex");
-        altitudeTex = serializedObject.FindProperty("altitudeMapTex");
-        normalTex = serializedObject.FindProperty("normalMapTex");
-    }
-    
-    public override void OnInspectorGUI()
-    {
-        serializedObject.Update();
-        
-        MeshManager script = (MeshManager) target;
-        if (GUILayout.Button("Preview Maps"))
+        if (FindObjectOfType<GameManager>().gameDebug)
         {
-            script.ButtonTest();
-            EditorUtility.SetDirty(script);
-            serializedObject.Update();
+            int z = 0;
+            for (int i = 0; i < _terrainMap.biomeMaps.Count; i += 2)
+            {
+                Gizmos.DrawGUITexture(new Rect(1000, (z / 2) * -1000, 1000, 1000), _terrainMap.biomeMaps[i]);
+                Gizmos.DrawGUITexture(new Rect(2000, (z / 2) * -1000, 1000, 1000), _terrainMap.biomeMaps[i + 1]);
+                z += 2;
+            }
         }
-
-        // EditorGUILayout.ObjectField("Height Map", heightMapSprite.objectReferenceValue, typeof(Sprite), false);
         
-        if ( heightMapTex.objectReferenceValue ) EditorGUI.DrawPreviewTexture(new Rect(20, 30, 150, 150), (Texture2D) heightMapTex.objectReferenceValue);
-        if ( altitudeTex.objectReferenceValue ) EditorGUI.DrawPreviewTexture(new Rect(20 + 150 + 5, 30, 150, 150), (Texture2D) altitudeTex.objectReferenceValue);
-        if ( normalTex.objectReferenceValue ) EditorGUI.DrawPreviewTexture(new Rect(20 + 150 + 5 + 150 + 5, 30, 150, 150), (Texture2D) normalTex.objectReferenceValue);
-        // float val = EditorGUIUtility.currentViewWidth / 150;
-        // EditorGUI.PrefixLabel(new Rect(25, 180, 100, 15), 0, new GUIContent(val.ToString("n2")));
-            
-        // EditorGUI.DrawPreviewTexture(new Rect(20 + 150 + 5, 30, 150, 150), (Texture2D) heightMapTex.objectReferenceValue);
-        // EditorGUI.DrawPreviewTexture(new Rect(20 + 150 + 5 + 150 + 5, 30, 150, 150), (Texture2D) heightMapTex.objectReferenceValue);
-
-        EditorGUILayout.Space(170);
-
-        DrawDefaultInspector();
-            
-        serializedObject.ApplyModifiedProperties();
-        
-        // DrawDefaultInspector();
+        Handles.Label(new Vector3(750, 1000, 0), transform.name);
+        Handles.Label(new Vector3(750, 975, 0), "min: " + _terrainMap.MapMin().ToString("n4"));
+        Handles.Label(new Vector3(750, 950, 0), "max: " + _terrainMap.MapMax().ToString("n4"));
+        Handles.Label(new Vector3(750, 925, 0), "mean: " + _terrainMap.mean.ToString("n4"));
+        Handles.Label(new Vector3(750, 900, 0), "variance: " + _terrainMap.variance.ToString("n4"));
+        Handles.Label(new Vector3(750, 875, 0), "standard dev.: " + _terrainMap.stdDev.ToString("n4"));
+        Handles.Label(new Vector3(750, 850, 0), "min: " + _terrainMap.MapMin().ToString("n4"));
+        Handles.Label(new Vector3(750, 825, 0), "max: " + _terrainMap.MapMax().ToString("n4"));
     }
 }
+
+// [CustomEditor(typeof(MeshManager))]
+// public class SomeScriptEditor : Editor 
+// {
+//     MeshManager manager;
+//     private SerializedProperty gridOffset;
+//     private SerializedProperty heightMapSprite;
+//     private SerializedProperty debugImg;
+//     private SerializedProperty heightMapTex;
+//     private SerializedProperty altitudeTex;
+//     private SerializedProperty normalTex;
+//
+//     void OnEnable()
+//     {
+//         gridOffset = serializedObject.FindProperty("gridOffset");
+//         heightMapSprite = serializedObject.FindProperty("_heightMapSprite");
+//         debugImg = serializedObject.FindProperty("img");
+//         heightMapTex = serializedObject.FindProperty("heightMapTex");
+//         altitudeTex = serializedObject.FindProperty("altitudeMapTex");
+//         normalTex = serializedObject.FindProperty("normalMapTex");
+//     }
+//     
+//     public override void OnInspectorGUI()
+//     {
+//         serializedObject.Update();
+//         
+//         MeshManager script = (MeshManager) target;
+//         if (GUILayout.Button("Preview Maps"))
+//         {
+//             script.ButtonTest();
+//             EditorUtility.SetDirty(script);
+//             serializedObject.Update();
+//         }
+//
+//         // EditorGUILayout.ObjectField("Height Map", heightMapSprite.objectReferenceValue, typeof(Sprite), false);
+//         
+//         if ( heightMapTex.objectReferenceValue ) EditorGUI.DrawPreviewTexture(new Rect(20, 30, 150, 150), (Texture2D) heightMapTex.objectReferenceValue);
+//         if ( altitudeTex.objectReferenceValue ) EditorGUI.DrawPreviewTexture(new Rect(20 + 150 + 5, 30, 150, 150), (Texture2D) altitudeTex.objectReferenceValue);
+//         if ( normalTex.objectReferenceValue ) EditorGUI.DrawPreviewTexture(new Rect(20 + 150 + 5 + 150 + 5, 30, 150, 150), (Texture2D) normalTex.objectReferenceValue);
+//         // float val = EditorGUIUtility.currentViewWidth / 150;
+//         // EditorGUI.PrefixLabel(new Rect(25, 180, 100, 15), 0, new GUIContent(val.ToString("n2")));
+//             
+//         // EditorGUI.DrawPreviewTexture(new Rect(20 + 150 + 5, 30, 150, 150), (Texture2D) heightMapTex.objectReferenceValue);
+//         // EditorGUI.DrawPreviewTexture(new Rect(20 + 150 + 5 + 150 + 5, 30, 150, 150), (Texture2D) heightMapTex.objectReferenceValue);
+//
+//         EditorGUILayout.Space(170);
+//
+//         DrawDefaultInspector();
+//             
+//         serializedObject.ApplyModifiedProperties();
+//         
+//         // DrawDefaultInspector();
+//     }
+// }

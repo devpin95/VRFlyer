@@ -12,11 +12,14 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: da2ff2a5b559b6d4d896042661a69fd8, type: 3}
   m_Name: Vegetation Info
   m_EditorClassIdentifier: 
-  vegetationGridSize: 20
-  treeCountPerGrid: 500
+  vegetationGridSize: 30
+  treeCountPerGrid: 175
   chunkHeightCutoff: 0.45
   treeHeightCutoff: 0.05
   treeScaleRange: {x: 2, y: 4}
+  sproutAnimationTime: 0.15
+  sproutAnimationDelay: 0
+  recalculateLodDistance: 250
   defaultCullDistance: 1500
   lowAltitudeCutoff: 9150
   lowAltitudeCullDistance: 750
@@ -25,3 +28,4 @@ MonoBehaviour:
   allocationDelay: 0
   deallocationBatchSize: 5
   deallocationDelay: 0
+  sproutAnimationBatchSize: 25

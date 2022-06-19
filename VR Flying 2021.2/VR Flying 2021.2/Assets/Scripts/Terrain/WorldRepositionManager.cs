@@ -1,5 +1,6 @@
 using System.Collections;
 using System.Collections.Generic;
+using UnityEditor;
 using UnityEngine;
 using UnityEngine.Serialization;
 
@@ -49,7 +50,7 @@ public class WorldRepositionManager : MonoBehaviour
 
     public void Reposition()
     {
-        Debug.Log("Resetting position");
+        // Debug.Log("Resetting position");
         float dis = Vector3.Distance(playerTransform.position, Vector3.zero);
         distanceFromOrigin += dis;
         majorOffset += playerTransform.position;

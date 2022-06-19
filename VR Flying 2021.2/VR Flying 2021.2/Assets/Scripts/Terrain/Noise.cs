@@ -1,9 +1,17 @@
 using System.Collections;
 using System.Collections.Generic;
+using DigitalRuby.WeatherMaker;
+using Unity.Mathematics;
 using UnityEngine;
 
 public static class Noise
 {
+    public static int octaveCount = 5;
+    public static float[] frequencies = { 1, 2, 4, 8, 16 };
+    public static float[] amplitudes = { 1, 0.5f, 0.25f, 0.125f, 0.0625f }; // sum = 1.9375
+    public static float octaveMax = 1.75f; // play with this number
+    public static float[] seeds = { 7462, 94128, 84174, 74571, 25304 };
+    
     public static float SampleOctavePerlinNoise(int x, int z, int mapsquares, int xoffset, int zoffset, float chunkSize, OctaveData octaveData)
     {
         // PARAMETERS
@@ -28,16 +36,17 @@ public static class Noise
         float xSamplePoint = Utilities.Remap(x, 0, mapsquares, minXSampleRange, minXSampleRange + chunkSize);
         float zSamplePoint = Utilities.Remap(z, 0, mapsquares, minZSampleRange, minZSampleRange + chunkSize);
 
-        for (int i = 0; i < octaveData.Amplitudes.Length; ++i)
+        for (int i = 0; i < octaveCount; ++i)
         {
-            float perlin = Mathf.PerlinNoise(octaveData.Frequencies[i] * xSamplePoint, octaveData.Frequencies[i] * zSamplePoint);
+            float perlin = Mathf.PerlinNoise(frequencies[i] * xSamplePoint + seeds[i], frequencies[i] * zSamplePoint + seeds[i]);
             float clamped = Mathf.Clamp01(perlin);
-            float sample = octaveData.Amplitudes[i] * clamped;
+            float sample = amplitudes[i] * clamped;
 
             y += sample;
         }
 
-        y /= octaveData.MAXSampleValue; // normalize the result
+        // Debug.Log("MAP OCTAVE MAX: " + octaveData.MAXSampleValue);
+        y /= octaveMax; // normalize the result
 
         return y;
 
@@ -57,6 +66,7 @@ public static class Noise
         
         octaveData.Amplitudes = new float[octaves];
         octaveData.Frequencies = new float[octaves];
+        octaveData.Seeds = new float[octaves];
 
         octaveData.Amplitudes[0] = 1;
         octaveData.Frequencies[0] = 1;
@@ -82,6 +92,7 @@ public static class Noise
     {
         private float[] amplitudes;
         private float[] frequencies;
+        private float[] seeds;
         private float maxSampleValue = 1;
 
         public float[] Amplitudes
@@ -94,6 +105,12 @@ public static class Noise
         {
             get => frequencies;
             set => frequencies = value;
+        }
+
+        public float[] Seeds
+        {
+            get => seeds;
+            set => seeds = value;
         }
 
         public float MAXSampleValue

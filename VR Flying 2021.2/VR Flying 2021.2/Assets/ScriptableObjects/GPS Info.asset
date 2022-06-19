@@ -12,6 +12,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: dbb83153dc028034fbd95edcfb0f67d2, type: 3}
   m_Name: GPS Info
   m_EditorClassIdentifier: 
+  updateTime: 10
   gpsLevels:
   - height: 0.375
     color: {r: 0.7294118, g: 1, b: 0.7294118, a: 1}
@@ -21,3 +22,7 @@ MonoBehaviour:
     color: {r: 0, g: 0.6901961, b: 0, a: 1}
   - height: 1
     color: {r: 1, g: 0.93333334, b: 0.8156863, a: 1}
+  trailLineWidth: 0.0005
+  checkpointCount: 50
+  distanceBetweenTrailPoints: 200
+  destinationDistanceFilter: 30

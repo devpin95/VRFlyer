@@ -8,7 +8,7 @@ using static Unity.Mathematics.math;
 // https://catlikecoding.com/unity/tutorials/procedural-meshes/creating-a-mesh/
 // https://www.raywenderlich.com/7880445-unity-job-system-and-burst-compiler-getting-started
 
-[BurstCompile]
+// [BurstCompile]
 public struct BuildAdvancedMapJob : IJobParallelFor
 {
     // variable - will change by job

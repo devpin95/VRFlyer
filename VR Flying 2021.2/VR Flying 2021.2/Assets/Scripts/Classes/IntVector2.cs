@@ -13,6 +13,12 @@ public class IntVector2
         this.y = y;
     }
 
+    public IntVector2(IntVector2 prev)
+    {
+        this.x = prev.x;
+        this.y = prev.y;
+    }
+
     public static bool operator ==(IntVector2 a, IntVector2 b)
     {
         return a?.x == b?.x && a?.y == b?.y;
@@ -21,6 +27,16 @@ public class IntVector2
     public static bool operator !=(IntVector2 a, IntVector2 b)
     {
         return a?.x != b?.x || a?.y != b?.y;
+    }
+
+    public static IntVector2 operator +(IntVector2 a, IntVector2 b)
+    {
+        return new IntVector2(a.x + b.x, a.y + b.y);
+    }
+
+    public override string ToString()
+    {
+        return "IntVector2(" + x + ", " + y + ")";
     }
 
     // static values

@@ -12,7 +12,8 @@ public class InFlightMenuController : MonoBehaviour
 {
     [Header("Events")] 
     public CEvent GPSEvent;
-    
+    public CEvent clusterEvent;
+
     [Header("Actions")] 
     [Tooltip("Case sensitive")] public string actionMapName = "In-Flight Menu Controls";
     // public InputActionAsset menuControls;
@@ -35,6 +36,7 @@ public class InFlightMenuController : MonoBehaviour
         menuControls.Enable();
         menuControls["Start Menu"].performed += ctx => StartSelect(ctx);
         menuControls["GPS"].performed += ctx => GPSButton(ctx);
+        menuControls["Cluster"].performed += ctx => ClusterButton(ctx);
         
         // get menu containers
         defaultMenu = transform.Find("Actions List");
@@ -71,9 +73,16 @@ public class InFlightMenuController : MonoBehaviour
 
     public void GPSButton(InputAction.CallbackContext ctx)
     {
-        Debug.Log("Open GPS");
+        // Debug.Log("Open GPS");
         DeactivateMenus();
         GPSEvent.Raise();
+    }
+
+    public void ClusterButton(InputAction.CallbackContext ctx)
+    {
+        // Debug.Log("Open Cluster");
+        DeactivateMenus();
+        clusterEvent.Raise();
     }
 
     public void ReturnToPadButtonPressed()

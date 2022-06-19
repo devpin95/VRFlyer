@@ -1,8 +1,8 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Linq;
 using UnityEngine;
-using UnityEngine.Serialization;
 
 public class TerrainInfo : ScriptableObject
 {
@@ -27,6 +27,16 @@ public class TerrainInfo : ScriptableObject
     public List<LODInfo> lods = new List<LODInfo>();
     public float cullDistance;
     public float heightCullDistance = 1000;
+    
+    [Header("Probabilities")] 
+    [Tooltip("Probability of a terrain chunk containing a helipad. Terrain chunk at [0, 0] will always have a helipad spawn")] 
+    public float pHelipadSpawn = 0.25f;
+    public float pLakeSpawn = 1f;
+    public float pLakeVarianceThreshold = 0.05f;
+    
+    public static float PLakeSpawn = 1f;
+    public static float PHelipadSpawn = 0.25f;
+    public static float PLakeVarianceThreshold = 1f;
 
     [Serializable]
     public struct LODInfo
@@ -44,5 +54,30 @@ public class TerrainInfo : ScriptableObject
     public LODInfo GetLowestLOD()
     {
         return lods[lods.Count - 1];
+    }
+
+    [Header("Biomes")] 
+    public List<Biome> biomes;
+
+    public List<Biome> GetNonContributingBiomes()
+    {
+        return biomes.Where(b => !b.contribute).ToList();
+    }
+    
+    public List<Biome> GetContributingBiomes()
+    {
+        return biomes.Where(b => b.contribute).ToList();
+    }
+
+    public float MaxTerrainHeight()
+    {
+        return biomes.Sum(b => b.maxHeight);
+    }
+
+    private void OnValidate()
+    {
+        PLakeSpawn = pLakeSpawn;
+        PHelipadSpawn = pHelipadSpawn;
+        PLakeVarianceThreshold = pLakeVarianceThreshold;
     }
 }

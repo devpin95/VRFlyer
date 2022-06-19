@@ -6,7 +6,13 @@ using UnityEngine.UI;
 
 public class VRDebug : MonoBehaviour
 {
+    [Header("Meta")]
     public TextMeshProUGUI fpsText;
+    public TextMeshProUGUI errorCountText;
+    public TextMeshProUGUI warningCountText;
+    private int _errorCount = 0;
+    private int _warningCount = 0;
+    
     private float _deltaTime = 0;
     
     public int maxLogDisplay = 5;
@@ -60,6 +66,9 @@ public class VRDebug : MonoBehaviour
         logColors.Add(LogType.Warning, warningColor);
         logColors.Add(LogType.Log, logColor);
         logColors.Add(LogType.Exception, exceptionColor);
+
+        errorCountText.text = 0.ToString();
+        warningCountText.text = 0.ToString();
     }
 
     private void Update()
@@ -80,6 +89,17 @@ public class VRDebug : MonoBehaviour
             TextMeshProUGUI tmp = newMessageObj.transform.Find("Message Text").GetComponent<TextMeshProUGUI>();
             tmp.text = padding + "(" + logCount + ") " + entry.content + "\n<color=#ededed>" + SplitAndFormatTrace(entry.author) + "</color>";
             tmp.color = logColors[entry.type];
+
+            if (entry.type == LogType.Error)
+            {
+                ++_errorCount;
+                errorCountText.text = _errorCount.ToString();
+            }
+            else if (entry.type == LogType.Warning)
+            {
+                ++_warningCount;
+                warningCountText.text = _warningCount.ToString();
+            }
 
             if (displayCount > maxLogDisplay)
             {
@@ -104,7 +124,6 @@ public class VRDebug : MonoBehaviour
             if (fps < 60) fpsText.color = errorColor;
             if (fps < 70) fpsText.color = warningColor;
             else if (fps <= 80) fpsText.color = logColor;
-            
         }
     }
 

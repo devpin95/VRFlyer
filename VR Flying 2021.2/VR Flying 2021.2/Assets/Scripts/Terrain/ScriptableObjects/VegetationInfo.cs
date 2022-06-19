@@ -10,8 +10,11 @@ public class VegetationInfo : ScriptableObject
     [FormerlySerializedAs("heightCutoff")] public float chunkHeightCutoff = 0.35f;
     public float treeHeightCutoff = 0.35f;
     public Vector2 treeScaleRange;
-    
+    public float sproutAnimationTime = 2;
+    public float sproutAnimationDelay = 0.05f;
+
     [FormerlySerializedAs("vegetationCullDistance")] [Header("Culling")]
+    public float recalculateLodDistance = 100f;
     public float defaultCullDistance = 1500f;
     public float lowAltitudeCutoff = 9250f;
     public float lowAltitudeCullDistance = 500f;
@@ -24,4 +27,6 @@ public class VegetationInfo : ScriptableObject
     [Tooltip("The delay between allocation batches")] [Range(0f, 0.1f)] public float allocationDelay = 0f;
     [Tooltip("The number of objects to deallocate in a frame")] public int deallocationBatchSize = 25;
     [Tooltip("The delay between deallocation batches")] [Range(0f, 0.1f)] public float deallocationDelay = 0f;
+
+    public int sproutAnimationBatchSize = 25;
 }

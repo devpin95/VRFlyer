@@ -1,12 +1,14 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.ComponentModel.Design.Serialization;
 using System.Runtime.ConstrainedExecution;
 using System.Threading;
 using Unity.Collections;
 using Unity.Jobs;
 using UnityEngine;
 using Unity.Mathematics;
+using Random = Unity.Mathematics.Random;
 
 // https://catlikecoding.com/unity/tutorials/procedural-meshes/creating-a-mesh/
 // https://www.raywenderlich.com/7880445-unity-job-system-and-burst-compiler-getting-started
@@ -28,16 +30,52 @@ public class TerrainMap
     private float[,] heightmap = null;
     private int mapverts = 256;
     private int mapsquares = 255;
+    public IntVector2 offset;
     
     private float maxy = float.MinValue;
     private float miny = float.MaxValue;
     public Vector2 maxypos = Vector2.negativeInfinity;
     public Vector2 minypos = Vector2.negativeInfinity;
+    public float mean = 0;
+    public float variance = 0;
+    public float stdDev = 0;
 
     // variables for generating octave noise
     private float[] _noiseFrequencies = null; // octave frequency 
     private float[] _noiseAmplitudes = null; // octave amplitude
     private float _maxSampleValue = 1; // the max sample value possible from the octave noise function (the sum of the amplitudes)
+
+    public List<Biome> nonContributingBiomes = new List<Biome>();
+    public List<Biome> contributingBiomes = new List<Biome>();
+    public float maxHeight;
+
+    public List<Texture2D> biomeMaps = new List<Texture2D>();
+    public bool[] terrainAttributes =
+    {
+        false, // has lake
+        false, // has split lakes
+        false, // has town
+    };
+    
+    public bool[] generatedAttributes =
+    {
+        false, // has lake
+        false, // has split lakes
+        false, // has town
+    };
+
+    public enum TerrainAttributes
+    {
+        HAS_LAKE = 0,
+        HAS_SPLIT_LAKE = 1,
+        HAS_TOWN = 2
+    }
+
+    public struct Debug_MapBiomes
+    {
+        public Texture2D weightMap;
+        public Texture2D heightMap;
+    }
 
     public void InitMap(int dim)
     {
@@ -59,16 +97,10 @@ public class TerrainMap
 
         miny = float.MaxValue;
         minypos = Vector2.negativeInfinity;
+
+        for (int i = 0; i < terrainAttributes.Length; ++i) terrainAttributes[i] = false;
     }
-
-    // DESTRUCTOR ------------------------------------
-    // ~TerrainMap()
-    // {
-    //     nativemin.Dispose();
-    //     nativemax.Dispose();
-    //     nativeHeightMap.Dispose();
-    // }
-
+    
     public void SetMap(float[,] map, float min, float max, Vector2 minpos, Vector2 maxpos)
     {
         if (map.GetLength(0) != mapverts)
@@ -84,40 +116,22 @@ public class TerrainMap
         maxypos = maxpos;
     }
     
-    public void RequestMap(Vector2 offset, float chunkSize, Action<MapGenerationOutput, bool> callback, Queue<MapGenerationOutput> queue, int octaves = 5)
+    public void RequestMap(Action<MapGenerationOutput, bool> callback, Queue<MapGenerationOutput> queue)
     {
         // this function will package map generation info together into an object that will be stored in an object
         // with a function to be run in a thread. The result of the thread will be send to the callback action passed
         // in to this function
         
-        
         // package the generation info together and make a new threaded terrain map object to hold that info
-        MapGenerationInput mapGenerationData = new MapGenerationInput(mapverts, mapsquares, offset, chunkSize, octaves);
+        MapGenerationInput mapGenerationData = new MapGenerationInput(mapverts, offset, contributingBiomes, terrainAttributes, maxHeight);
+        TerrainMapThreaded threadedTerrainMap = new TerrainMapThreaded(mapGenerationData, callback, queue);
+        ThreadPool.QueueUserWorkItem(delegate { threadedTerrainMap.ThreadProc(); });
 
-        // ** IJob **
-        // -------------------------------------------------------------------------------------------------------------
-        // TerrainMapIJob tmijob = new TerrainMapIJob();
-        //
-        //
-        // JobHandle jobHandle = tmijob.Schedule();
-        // jobHandle.Complete();
+    }
 
-        // ** Thread pool **
-        // -------------------------------------------------------------------------------------------------------------
-        // // set up the thread data with the generation info, the callback to put on the queue, and the queue itself
-        TerrainMapThreaded tmt = new TerrainMapThreaded(mapGenerationData, callback, queue);
-        
-        ThreadPool.QueueUserWorkItem(delegate { tmt.ThreadProc(); });
-
-        // ** Thread **
-        // -------------------------------------------------------------------------------------------------------------
-        // // make a delegate that will call the threaded terrain map function
-        // ThreadStart threadStart = delegate { tmt.ThreadProc(); };
-        //
-        // // make a new thread and call it to start the threaded terrain generation in the TerrainMapThreaded class
-        // Thread thread = new Thread(threadStart);
-        // thread.Start();
-        // thread.Join();
+    public void SetTerrainAttribute(TerrainAttributes attr, bool s)
+    {
+        terrainAttributes[(int)attr] = s;
     }
 
     public float SampleHeightMap(int x, int y)
@@ -125,15 +139,15 @@ public class TerrainMap
         return heightmap[x, y];
     }
 
-    public float SampleAndScaleHeightMap(int x, int z, AnimationCurve curve, float remapmin, float remapmax)
+    public float SampleAndScaleHeightMap(int x, int z, float remapmin, float remapmax)
     {
         float y = heightmap[x, z]; // get the height map value [0, 1]
-        y = curve.Evaluate(y); // evaluate it on the curve
+        // y = curve.Evaluate(y); // evaluate it on the curve
         y = Utilities.Remap(y, 0, 1, remapmin, remapmax); // remap to [min, max]
         return y;
     }
     
-    public Vector2 SampleAndScaleHeightMap(float x, float z, AnimationCurve curve, float remapmin, float remapmax)
+    public Vector2 SampleAndScaleHeightMap(float x, float z, float remapmin, float remapmax)
     {
         // returns a vector2 of the map samples
         // vector2.x is the height map value [0,1]
@@ -145,10 +159,10 @@ public class TerrainMap
         // then evaluate the height on the terrain curve
         // then remap the value to the min/max terrain heights
         float lerpHeight = Utilities.BiLerp(x, z, heightmap);
-        float height = curve.Evaluate(lerpHeight);
-        float y = Utilities.Remap(height, 0, 1, remapmin, remapmax);
+        // float height = curve.Evaluate(lerpHeight);
+        float y = Utilities.Remap(lerpHeight, 0, 1, remapmin, remapmax);
 
-        samples.x = height;
+        samples.x = lerpHeight;
         samples.y = y;
         
         return samples;
@@ -257,6 +271,21 @@ public class TerrainMap
             for (int x = 0; x < mapverts; x += lod)
             {
                 float y = Utilities.Remap(animCurve.Evaluate(heightmap[x, z]), 0, 1, min, max);
+                nativeMap[vertIndex] = new float3(x * vertScale, y, z * vertScale);
+
+                ++vertIndex;
+            }
+        }
+    }
+
+    public void GetVectorMapNative(ref NativeArray<float3> nativeMap, float vertScale, float max, int lod = 1)
+    {
+        int vertIndex = 0;
+        for (int z = 0; z < mapverts; z += lod)
+        {
+            for (int x = 0; x < mapverts; x += lod)
+            {
+                float y = heightmap[x, z] * max;
                 nativeMap[vertIndex] = new float3(x * vertScale, y, z * vertScale);
 
                 ++vertIndex;
@@ -394,6 +423,43 @@ public class TerrainMap
         altitudeMapTex.Apply();
 
         return altitudeMapTex;
+    }
+
+    public void GetDebugBiomeMaps(List<Biome> biomes, IntVector2 offset)
+    {
+        biomeMaps = new List<Texture2D>();
+        
+        foreach (var biome in biomes)
+        {
+            Color[] biomeHeightMap = new Color[heightmap.Length];
+            Color[] biomeWeightMap = new Color[heightmap.Length];
+
+            int lowest = (int)minypos.x + (int)minypos.y * mapverts;
+
+            for (int i = 0; i < heightmap.Length; ++i)
+            {
+                int y = i / mapverts; // integer division, we want the truncated int here
+                int x = i % mapverts; // we want the column of the current row
+
+                float height = biome.Height01(x, y, offset);
+                biomeHeightMap[i] = new Color(height, height, height);
+                
+                
+                float weight = biome.Weight(x, y, offset);
+                biomeWeightMap[i] = new Color(weight, weight, weight);
+            }
+        
+            Texture2D debugHeightMap = new Texture2D(mapverts, mapverts);
+            debugHeightMap.SetPixels(biomeHeightMap);
+            debugHeightMap.Apply();
+            
+            Texture2D debugWeightMap = new Texture2D(mapverts, mapverts);
+            debugWeightMap.SetPixels(biomeWeightMap);
+            debugWeightMap.Apply();
+            
+            biomeMaps.Add(debugHeightMap);
+            biomeMaps.Add(debugWeightMap);
+        }
     }
     
     public float SampleOctavePerlinNoise(int x, int z, int xoffset, int zoffset, float chunkSize)
@@ -621,6 +687,12 @@ public class TerrainMap
         return new Vector3(mapPos.x * vertScale, height, mapPos.z * vertScale);
     }
     
+    public static Vector3 ScaleMapPosition(Vector3 mapPos, float vertScale, float maxHeight)
+    {
+        float height = mapPos.y * maxHeight;
+        return new Vector3(mapPos.x * vertScale, height, mapPos.z * vertScale);
+    }
+    
     // -----------------------------------------------------------------------------------------------------------------
     // -----------------------------------------------------------------------------------------------------------------
     // -----------------------------------------------------------------------------------------------------------------
@@ -630,19 +702,19 @@ public class TerrainMap
     {
         // this class holds the information needed to generate a 2D map of octave perlin noise
         
-        public Vector2 offset;
-        public float chunkSize;
+        public IntVector2 offset;
         public int mapverts;
-        public int mapsquares;
-        public int octaves;
+        public List<Biome> biomes;
+        public float maxHeight;
+        public bool[] attributes;
         
-        public MapGenerationInput(int mapverts, int mapsquares, Vector2 offset, float chunkSize, int octaves)
+        public MapGenerationInput(int mapverts, IntVector2 offset, List<Biome> biomes, bool[] attributes, float maxHeight)
         {
             this.mapverts = mapverts;
-            this.mapsquares = mapsquares;
             this.offset = offset;
-            this.chunkSize = chunkSize;
-            this.octaves = octaves;
+            this.biomes = biomes;
+            this.attributes = attributes;
+            this.maxHeight = maxHeight;
         }
     }
 
@@ -650,11 +722,16 @@ public class TerrainMap
     {
         // this class holds the 2D map of octave perlin noise generated by the Noise class
         public float[,] map;
+        public float[,] water;
         public float min;
         public float max;
         public Vector2 minpos;
         public Vector2 maxpos;
+        public float mean;
+        public float variance;
+        public float stdDev;
         public Action<MapGenerationOutput, bool> callback;
+        public bool[] attributes;
     }
 
     private class TerrainMapThreaded
@@ -678,9 +755,8 @@ public class TerrainMap
             MapGenerationOutput output = new MapGenerationOutput();
             output.map = new float[generationInput.mapverts, generationInput.mapverts];
             output.callback = _callback;
-            
-            // generate octave frequencies and amplitudes of doing octave noise
-            Noise.OctaveData octaveData = Noise.GenerateOctaveData(generationInput.octaves);
+            output.mean = 0;
+            output.attributes = new bool[3];
 
             // init the min and max values so we can remap later
             output.max = float.MinValue;
@@ -689,15 +765,16 @@ public class TerrainMap
             output.minpos = Vector2.negativeInfinity;
 
             // convert these to ints now so we dont have to do it every loop
-            int xoffset = (int) generationInput.offset.x;
-            int zoffset = (int) generationInput.offset.y;
-        
+            // int xoffset = generationInput.offset.x;
+            // int zoffset = generationInput.offset.y;
+
             // create vertices
             for (int x = 0; x < generationInput.mapverts; ++x)
             {
                 for (int z = 0; z < generationInput.mapverts; ++z)
                 {
-                    float y = Noise.SampleOctavePerlinNoise(x, z, generationInput.mapsquares, xoffset, zoffset, generationInput.chunkSize, octaveData);
+                    float y = Biome.AccumulateBiomes01(x, z, generationInput.offset, generationInput.biomes, generationInput.maxHeight);
+                    // float y = Noise.SampleOctavePerlinNoise(x, z, generationInput.mapsquares, xoffset, zoffset, generationInput.chunkSize, octaveData);
 
                     if (y < output.min)
                     {
@@ -713,8 +790,31 @@ public class TerrainMap
                         output.maxpos.y = z;
                     }
 
+                    output.mean += y;
+                    
                     output.map[x, z] = y;
                 }
+            }
+
+            output.mean /= output.map.Length;
+            float sqrdDiffSum = 0;
+            
+            // second pass, calculate the variance given the median
+            for (int x = 0; x < generationInput.mapverts; ++x)
+            {
+                for (int z = 0; z < generationInput.mapverts; ++z)
+                {
+                    float diff = output.map[x, z] - output.mean;
+                    sqrdDiffSum += diff * diff;
+                }
+            }
+
+            output.variance = sqrdDiffSum / (output.map.Length - 1);
+            output.stdDev = Mathf.Sqrt(output.variance);
+
+            if (generationInput.attributes[(int)TerrainAttributes.HAS_LAKE] && output.variance < TerrainInfo.PLakeVarianceThreshold)
+            {
+                output.attributes[(int)TerrainAttributes.HAS_LAKE] = true;
             }
 
             // put the result in the locked queue so that whoever needs it can access it
@@ -744,6 +844,7 @@ public class TerrainMap
         {
             public NativeArray<float> amplitudes;
             public NativeArray<float> frequencies;
+            public NativeArray<float2> seeds;
             public float max;
         }
 
@@ -791,6 +892,7 @@ public class TerrainMap
 
             octaveData.amplitudes.Dispose();
             octaveData.frequencies.Dispose();
+            octaveData.seeds.Dispose();
         }
 
         private OctaveData CalculateOctaves(int octaves)
@@ -799,6 +901,7 @@ public class TerrainMap
             
             octaveData.amplitudes = new NativeArray<float>(octaves, Allocator.Temp);
             octaveData.frequencies = new NativeArray<float>(octaves, Allocator.Temp);
+            octaveData.seeds = new NativeArray<float2>(octaves, Allocator.Temp);
 
             octaveData.amplitudes[0] = 1;
             octaveData.frequencies[0] = 1;
@@ -815,6 +918,7 @@ public class TerrainMap
             
                 // set the octave frequency
                 octaveData.frequencies[i] = fact;
+                octaveData.seeds[i] = new float2(UnityEngine.Random.Range(0, 100000), UnityEngine.Random.Range(0, 100000));
             }
 
             return octaveData;
@@ -846,13 +950,15 @@ public class TerrainMap
 
             for (int i = 0; i < octaveData.amplitudes.Length; ++i)
             {
-                float perlin = Mathf.PerlinNoise(octaveData.frequencies[i] * xSamplePoint, octaveData.frequencies[i] * zSamplePoint);
+                float perlin = Mathf.PerlinNoise(octaveData.frequencies[i] * xSamplePoint + octaveData.seeds[i].x, octaveData.frequencies[i] * zSamplePoint + octaveData.seeds[i].y);
                 float clamped = Mathf.Clamp01(perlin);
                 float sample = octaveData.amplitudes[i] * clamped;
 
                 y += sample;
+                y += sample;
             }
 
+            Debug.Log("MAP OCTAVE MAX: " + octaveData.max);
             y /= octaveData.max; // normalize the result
 
             return y;

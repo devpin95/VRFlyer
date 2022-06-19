@@ -76,6 +76,15 @@ public class TerrainManager : MonoBehaviour
         
         _expectedTerrainGenerationEventCount = TerrainChunkPool.Instance.poolSize;
 
+        for (int i = 0; i < terrainInfo.biomes.Count; ++i)
+        {
+            if (terrainInfo.biomes[i].seedHeights) terrainInfo.biomes[i].heightMap.randomOffset = new IntVector2(Random.Range(0, 1000), Random.Range(0, 1000));
+            else terrainInfo.biomes[i].heightMap.randomOffset = IntVector2.zero;
+
+            if (terrainInfo.biomes[i].seedWeights) terrainInfo.biomes[i].weightMap.randomOffset = new IntVector2(Random.Range(0, 1000), Random.Range(0, 1000));
+            else terrainInfo.biomes[i].weightMap.randomOffset = IntVector2.zero;
+        }
+
         // do this in start so that the player doesnt have to travel playerTravelDistanceUpdateThreshold before generating the terrain
         // actually, we can't do this in start because some of the terrain chunks will not have done their start so we will get an error
         // UpdateTerrainGrid(startup: true);
@@ -236,7 +245,7 @@ public class TerrainManager : MonoBehaviour
         // build call
         _startup = false;
         
-        Debug.Log("Added " + addedItems);
+        // Debug.Log("Added " + addedItems);
 
         yield return null;
     }
@@ -265,6 +274,38 @@ public class TerrainManager : MonoBehaviour
             
             // notify everyone that the terrain has been generated
             terrainReadyEvent.Raise();
+        }
+    }
+
+    public void ButtonTest()
+    {
+        if (Application.isPlaying)
+        {
+            Debug.Log("Regenerating terrain...");
+            UpdateTerrainGrid();
+        }
+    }
+}
+
+[CustomEditor(typeof(TerrainManager))]
+public class TerrainManagerEditor : Editor 
+{
+
+    void OnEnable()
+    {
+    }
+    
+    public override void OnInspectorGUI()
+    {
+        DrawDefaultInspector();
+        
+        if (Application.isPlaying)
+        {
+            TerrainManager script = (TerrainManager) target;
+            if (GUILayout.Button("Regenerate Terrain"))
+            {
+                script.ButtonTest();
+            }
         }
     }
 }

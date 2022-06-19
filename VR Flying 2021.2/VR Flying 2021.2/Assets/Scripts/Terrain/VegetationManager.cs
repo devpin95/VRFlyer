@@ -1,6 +1,7 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Linq;
 using DigitalRuby.WeatherMaker;
 using Unity.VisualScripting;
 using UnityEngine;
@@ -10,6 +11,7 @@ public class VegetationManager : MonoBehaviour
 {
     public TerrainInfo terrainInfo;
     public VegetationInfo vegetationInfo;
+    private ProceduralSeed _procSeed;
     public float cullDistance = 500;
     public int activeChunkCount = 0;
     
@@ -36,9 +38,21 @@ public class VegetationManager : MonoBehaviour
         public bool valid;
         public bool populated;
         public GameObject chunkContainer;
+        public Bounds bounds;
+    }
+
+    private struct TreeAnimationInfo
+    {
+        public float animationTime;
+        public Transform transform;
+        public Vector3 startingPos;
+        public Vector3 targetPos;
     }
     
-    private List<ChunkInfo> _activeChunks;
+    private List<ChunkInfo> _chunks;
+    private List<ChunkInfo> _validChunks;
+
+    private bool _firstGeneration = true;
 
     private void Awake()
     {
@@ -60,7 +74,10 @@ public class VegetationManager : MonoBehaviour
         _playerTransform = FindObjectOfType<WorldRepositionManager>().playerTransform;
         _previousPlayerPosition = _playerTransform.position;
 
-        _activeChunks = new List<ChunkInfo>();
+        _chunks = new List<ChunkInfo>();
+        _validChunks = new List<ChunkInfo>();
+
+        _procSeed = GetComponent<ProceduralSeed>();
 
         InitGrid();
     }
@@ -69,7 +86,7 @@ public class VegetationManager : MonoBehaviour
     void Update()
     {
         // only recalculate the LOD when the player has traveled a certain distance
-        if (Vector3.Distance(_previousPlayerPosition, _playerTransform.position) > terrainInfo.recalculateLodDistance)
+        if (Vector3.Distance(_previousPlayerPosition, _playerTransform.position) > vegetationInfo.recalculateLodDistance)
         {
             _previousPlayerPosition = _playerTransform.position;
             StartCoroutine(RecalculateLODs(_playerTransform.position));
@@ -108,7 +125,13 @@ public class VegetationManager : MonoBehaviour
                 chunk.chunkContainer.transform.name = "Vegetation chunk [" + x + ", " + z + "]";
                 chunk.chunkContainer.SetActive(false);
                 
-                _activeChunks.Add(chunk);
+                // generate bounds for the chunk
+                Bounds bound = new Bounds();
+                bound.center = transform.position + chunk.pos;
+                bound.size = new Vector3(_vegChunkSize, _vegChunkSize / 2, _vegChunkSize);
+                chunk.bounds = bound;
+                
+                _chunks.Add(chunk);
             }
         }
     }
@@ -124,29 +147,33 @@ public class VegetationManager : MonoBehaviour
             startup = false;
         }
 
-        ValidateChunkHeights(); // determine which chunks we can populate
+        yield return ValidateChunkHeights(); // determine which chunks we can populate
         yield return RecalculateLODs(_playerTransform.position); // find the chunks close enough and populate them with trees
+
+        _firstGeneration = false;
     }
 
     private void ClearChunks()
     {
         // remove all of the trees from this chunk
-        for (int i = 0; i < _activeChunks.Count; ++i)
+        for (int i = 0; i < _validChunks.Count; ++i)
         {
-            StartCoroutine(DeallocateTrees(_activeChunks[i]));
+            StartCoroutine(DeallocateTrees(_validChunks[i]));
         }
     }
 
     IEnumerator DeallocateTrees(ChunkInfo chunk)
     {
-        if (!chunk.populated) yield break;
+        if (!chunk.populated && chunk.chunkContainer.transform.childCount == 0) yield break;
         
         // loop through all of the children in the container and relinquish them back to the pool
         // TODO do this in chunks in a coroutine so that it doesnt block the main thread too long
         int treeCount = 0;
         for (int child = chunk.chunkContainer.transform.childCount - 1; child >= 0; --child)
         {
+            if (child >= chunk.chunkContainer.transform.childCount) break; // idk just skip it if this happens I guess
             var tree = chunk.chunkContainer.transform.GetChild(child);
+            
             TreePool.Instance.RelinquishTreeInstance(tree.gameObject);
 
             ++treeCount;
@@ -163,13 +190,18 @@ public class VegetationManager : MonoBehaviour
     IEnumerator AllocateTrees(ChunkInfo chunk)
     {
         // only generate trees for valid chunks
-        if (!chunk.valid) yield break;
+        // if (!chunk.valid) yield break;
         
         // the range of x and z values in the terrain map for this vegetation chunk
         Vector2 xBounds = new Vector2(chunk.mapX, chunk.mapX + _vertsPerChunk);
         Vector2 zBounds = new Vector2(chunk.mapZ, chunk.mapZ + _vertsPerChunk);
 
         int treeCount = 0;
+
+        List<TreeAnimationInfo> treeTransforms = new List<TreeAnimationInfo>();
+        
+        // seed the rng so that we generate the same thing each time
+        _procSeed.InitState((int)xBounds.x + (int)zBounds.x + (int)xBounds.y + (int)zBounds.y + (int)xBounds.x % 3 + (int)zBounds.y % 6);
         
         // create the required number of trees
         for (int i = 0; i < vegetationInfo.treeCountPerGrid; ++i)
@@ -181,12 +213,14 @@ public class VegetationManager : MonoBehaviour
             float yScaled = 0; // scaled y position [remapMin, remapMax] at (x, z)
 
             // randomly pick an (x, z) in this chunk then sample the height map for y
-            x = UnityEngine.Random.Range(xBounds.x, xBounds.y);
-            z = UnityEngine.Random.Range(zBounds.x, zBounds.y);
+            x = _procSeed.Range(xBounds.x, xBounds.y);
+            z = _procSeed.Range(zBounds.x, zBounds.y);
+            // x = UnityEngine.Random.Range(xBounds.x, xBounds.y);
+            // z = UnityEngine.Random.Range(zBounds.x, zBounds.y);
                 
             // sample the height map for the raw height and scaled height
             // x [0,1], y [remapmin, remapmax]
-            Vector2 ySamples = _map.SampleAndScaleHeightMap(x, z, terrainInfo.terrainCurve, terrainInfo.remapMin, terrainInfo.remapMax);
+            Vector2 ySamples = _map.SampleAndScaleHeightMap(x, z, 0, terrainInfo.MaxTerrainHeight());
             y = ySamples.x;
             yScaled = ySamples.y;
 
@@ -203,44 +237,79 @@ public class VegetationManager : MonoBehaviour
             // make sure the pool actually returned an tree object
             if (tree != null)
             {
-                // set the position of the tree
+                // set the position of the tree to the start position under the map so that we can animate it up
                 tree.transform.position = pos + transform.position - tree.transform.Find("Attach Point").transform.localPosition;
+                Vector3 localEndPosition = tree.transform.localPosition;
+                
+                if (!_firstGeneration) tree.transform.localPosition -= new Vector3(0, 10, 0);
+
+                // create a new animation object for sprouting the tree
+                TreeAnimationInfo animationInfo;
+                animationInfo.animationTime = 0;
+                animationInfo.transform = tree.transform;
+                animationInfo.startingPos = tree.transform.localPosition;
+                animationInfo.targetPos = localEndPosition;
+                treeTransforms.Add(animationInfo);
             }
 
             ++treeCount;
 
-            if (treeCount > vegetationInfo.allocationBatchSize)
+            if (treeCount > vegetationInfo.allocationBatchSize && !_firstGeneration)
             {
                 treeCount = 0;
                 yield return new WaitForSeconds(vegetationInfo.allocationDelay);
             }
         }
+        
+        if (!_firstGeneration) yield return SproutVegetation(treeTransforms);
     }
     
-    private void ValidateChunkHeights()
+    IEnumerator ValidateChunkHeights()
     {
+        _validChunks = new List<ChunkInfo>();
+
+        int batch = 0;
         // loop through the chunks and deactivate those that are too high
-        for (int i = 0; i < _activeChunks.Count; ++i)
+        for (int i = 0; i < _chunks.Count; ++i)
         {
-            var chunk = _activeChunks[i];
+            var chunk = _chunks[i];
             
             // true if the height of the chunk is <= heightCutoff
+            float chunkHeight = _map.SampleAndScaleHeightMap(chunk.mapX, chunk.mapZ, 0, terrainInfo.MaxTerrainHeight());
+            chunk.pos = new Vector3(chunk.pos.x, chunkHeight, chunk.pos.z);
             chunk.valid = _map.SampleHeightMap(chunk.mapX, chunk.mapZ) <= vegetationInfo.chunkHeightCutoff;
+            
+            if ( chunk.valid ) _validChunks.Add(chunk);
 
-            _activeChunks[i] = chunk;
+            _chunks[i] = chunk;
+
+            ++batch;
+            if (batch == 250 && !_firstGeneration)
+            {
+                batch = 0;
+                yield return null;
+            }
         }
     }
 
     IEnumerator RecalculateLODs(Vector3 pos)
     {
-        for (int i = 0; i < _activeChunks.Count; ++i)
+        // yield return SortValidChunks(pos);
+        
+        // Debug.Log(_validChunks.Count + " Sorted chunks");
+        
+        for (int i = 0; i < _validChunks.Count; ++i)
         {
             // if the chunk is not valid, ignore it
-            if (!_activeChunks[i].valid) continue;
+            // if (!_validChunks[i].valid) continue;
             
-            ChunkInfo targetChunk = _activeChunks[i];
+            ChunkInfo targetChunk = _validChunks[i];
             
-            // generate bounds for the chunk
+            // // generate bounds for the chunk
+            // Bounds bound = new Bounds();
+            // bound.center = transform.position + targetChunk.pos;
+            // bound.size = new Vector3(_vegChunkSize, _vegChunkSize / 2, _vegChunkSize);
+            
             Bounds bound = new Bounds();
             bound.center = transform.position + targetChunk.pos;
             bound.size = new Vector3(_vegChunkSize, _vegChunkSize / 2, _vegChunkSize);
@@ -248,41 +317,126 @@ public class VegetationManager : MonoBehaviour
             // get the distance between the player and the bounds for this chunk
             float dis = Mathf.Sqrt(bound.SqrDistance(pos));
 
-            // if the chunk is further away from the player than the cull distance
-            float cull = vegetationInfo.defaultCullDistance;
-            
             // if (_worldRepositionManager.playerWorldPos.y > vegetationInfo.lowAltitudeCutoff)
             //     cull = vegetationInfo.lowAltitudeCullDistance;
             
-            if (dis > cull)
+            bool previouslyActive = targetChunk.chunkContainer.activeSelf;
+            
+            if (dis > vegetationInfo.defaultCullDistance)
             {
+                targetChunk.chunkContainer.SetActive(false);
+                
                 // then we are going to deactivate this chunk, so if it was active, we can deallocate all of it's trees
-                if (targetChunk.chunkContainer.activeSelf)
+                if (previouslyActive)
                 {
                     // deallocate trees
+                    Debug.Log("Removing trees for " + targetChunk.chunkContainer.transform.name);
                     yield return DeallocateTrees(targetChunk);
                     targetChunk.populated = false;
                 }
-                
-                targetChunk.chunkContainer.SetActive(false);
             }
             // otherwise, if the chunk is closer than the cull distance
             else
             {
+                // copy the current state then set to active so that we can tell if we went from unactive to active
+                // then set the state to active before allocating trees so that we can animate the trees up over time
+                // instead of instantly placing them
+                targetChunk.chunkContainer.SetActive(true);
                 // then we are going to activate this chunk, so if it was unactive, we need to allocate all of it's trees
-                if (!targetChunk.chunkContainer.activeSelf)
+                if (!previouslyActive)
                 {
                     // allocate trees
+                    // Debug.Log("Allocating trees for " + targetChunk.chunkContainer.transform.name);
                     yield return AllocateTrees(targetChunk);
                     targetChunk.populated = true;
                 }
-                targetChunk.chunkContainer.SetActive(true);
             }
 
-            _activeChunks[i] = targetChunk;
+            _validChunks[i] = targetChunk;
         }
 
         yield return null;
+    }
+
+    IEnumerator SortValidChunks(Vector3 pos)
+    {
+        List<Tuple<ChunkInfo, float>> orderedChunkList = new List<Tuple<ChunkInfo, float>>();
+        int batch = 0;
+        
+        for (int i = 0; i < _validChunks.Count; ++i)
+        {
+            // loop through each valid chunk and calculate it's distance
+            float dis = Mathf.Sqrt(_validChunks[i].bounds.SqrDistance(pos));
+            var chunk = new Tuple<ChunkInfo, float>(_validChunks[i], dis);
+
+            bool inserted = false;
+            // loop through the items in the ordered list until we find an item whose distance
+            // is less that the current chunks distance. If we find one, insert the current item at that index
+            for (int j = 0; j < orderedChunkList.Count; ++j)
+            {
+                if (dis < orderedChunkList[j].Item2)
+                {
+                    orderedChunkList.Insert(j, chunk);
+                    inserted = true;
+                    break;
+                }
+            }
+            
+            // if there are no items in the ordered list, or if this chunk is the furthest chunk so far, just add
+            // it at the end of the list
+            if (!inserted)
+            {
+                orderedChunkList.Add(chunk);
+            }
+
+            ++batch;
+            if (batch > 10 && !_firstGeneration)
+            {
+                batch = 0;
+                yield return null;
+            }
+        }
+
+        // now extract all of the ChunkInfo items and put them back into the _validChunks list, which is now sorted
+        _validChunks = orderedChunkList.Select(chunk => chunk.Item1).ToList();
+        
+        yield return null;
+    }
+    
+    IEnumerator SproutVegetation(List<TreeAnimationInfo> animations)
+    {
+        if (animations.Count == 0) yield break;
+        
+        while (animations[0].animationTime / vegetationInfo.sproutAnimationTime < 1)
+        {
+            // loop through the tree animation in batches
+            int batch = 0;
+            for (int i = 0; i < animations.Count; ++i)
+            {
+                // copy out the tree animation and increment its animation time
+                var treeAnimation = animations[i];
+                treeAnimation.animationTime += Time.deltaTime;
+
+                // set the tree's local position to the lerp of it's start/ending positions
+                treeAnimation.transform.localPosition = Vector3.Lerp(treeAnimation.startingPos, treeAnimation.targetPos,
+                    animations[0].animationTime / vegetationInfo.sproutAnimationTime);
+
+                // copy back the animation info
+                animations[i] = treeAnimation;
+
+                // increment the batch count and stop for this frame if we reached out batch size
+                ++batch;
+                if (batch > vegetationInfo.sproutAnimationBatchSize)
+                {
+                    batch = 0;
+                    yield return null;
+                }
+            }
+            
+            // we have gone through the animations one more time, now wait for a certain length of time
+            // and continue the animations if the animation time has not reached the target duration
+            yield return new WaitForSeconds(vegetationInfo.sproutAnimationDelay);
+        }
     }
 
     public void SpawnPointResponse(Vector3 pos)
@@ -292,7 +446,7 @@ public class VegetationManager : MonoBehaviour
 
     private void GenerateTrees()
     {
-        foreach (var chunk in _activeChunks)
+        foreach (var chunk in _chunks)
         {
             AllocateTrees(chunk);
         }
@@ -302,7 +456,7 @@ public class VegetationManager : MonoBehaviour
     {
         if (_map == null) return;
         
-        foreach (var chunk in _activeChunks)
+        foreach (var chunk in _chunks)
         {
             if (!chunk.valid) continue;
             
