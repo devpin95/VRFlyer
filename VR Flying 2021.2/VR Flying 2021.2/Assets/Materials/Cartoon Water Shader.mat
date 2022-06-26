@@ -1,0 +1,78 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!21 &2100000
+Material:
+  serializedVersion: 6
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_Name: Cartoon Water Shader
+  m_Shader: {fileID: -6465566751694194690, guid: d0ac6e3cd6368db4f99f8e1f0624ddbf, type: 3}
+  m_ShaderKeywords: 
+  m_LightmapFlags: 2
+  m_EnableInstancingVariants: 0
+  m_DoubleSidedGI: 0
+  m_CustomRenderQueue: -1
+  stringTagMap: {}
+  disabledShaderPasses: []
+  m_SavedProperties:
+    serializedVersion: 3
+    m_TexEnvs:
+    - _LargeNormalMap:
+        m_Texture: {fileID: 2800000, guid: e88e3a4486e59ca40b4f97abc00daa4d, type: 3}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _Texture2DAsset_081f054c41244f0aa77c2acc136e0299_Out_0:
+        m_Texture: {fileID: 2800000, guid: e88e3a4486e59ca40b4f97abc00daa4d, type: 3}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _Texture2DAsset_514f2ae92d5b4d7c8c39e18a00eefebb_Out_0:
+        m_Texture: {fileID: 2800000, guid: 7c97b1fc491147444b1a1ba70b669ebd, type: 3}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _Texture2DAsset_cc7641aac35947e781a3722932b1c577_Out_0:
+        m_Texture: {fileID: 2800000, guid: efe22d396da1b5942a385d152f1f8d19, type: 3}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - unity_Lightmaps:
+        m_Texture: {fileID: 0}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - unity_LightmapsInd:
+        m_Texture: {fileID: 0}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - unity_ShadowMasks:
+        m_Texture: {fileID: 0}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    m_Ints: []
+    m_Floats:
+    - _LargeRefractionScale: 92.63
+    - _LargeRefractionSpeed: 0.66
+    - _NormalMapSpeed: 25
+    - _NormalStrength: 0.679
+    - _QueueControl: 0
+    - _QueueOffset: 0
+    - _SmallRefractionScale: 5000
+    - _SmallRefractionSpeed: 2
+    - _WaveDistance: 300
+    m_Colors:
+    - _BaseColor: {r: 0, g: 0.1529412, b: 0.3490196, a: 1}
+    - _NormalMapTilling: {r: 1, g: 1, b: 0, a: 0}
+    - _RefractionColor: {r: 0, g: 0.3677988, b: 0.4056604, a: 1}
+  m_BuildTextureStacks: []
+--- !u!114 &1710174620432627589
+MonoBehaviour:
+  m_ObjectHideFlags: 11
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: d0353a89b1f911e48b9e16bdc9f2e058, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  version: 5

@@ -3,16 +3,26 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 using System.Threading;
+using Unity.VisualScripting;
 using UnityEngine;
 using UnityEngine.Assertions.Must;
 using UnityEngine.EventSystems;
 using UnityEngine.InputSystem;
+using UnityEngine.Serialization;
+using UnityEngine.UI;
 
 public class InFlightMenuController : MonoBehaviour
 {
     [Header("Events")] 
     public CEvent GPSEvent;
     public CEvent clusterEvent;
+    
+    [FormerlySerializedAs("inFlightMenuInstance")] [Header("Menu")]
+    public GameObject inFlightMenu;
+    public GameObject repositionInstructions;
+    public XRRepositionController repositionController;
+
+    private GameObject actionsList;
 
     [Header("Actions")] 
     [Tooltip("Case sensitive")] public string actionMapName = "In-Flight Menu Controls";
@@ -23,9 +33,11 @@ public class InFlightMenuController : MonoBehaviour
     private PlayerInput playerInput;
 
     // events and menus
-    private Transform currentMenu;
-    private Transform instrumentListMenu;
-    private Transform defaultMenu;
+    private Transform actionsMenu;
+    private MenuEnabler _menuEnabler;
+    private List<Selectable> _selectables;
+    private int _currentSelectable = 0;
+    
     // Start is called before the first frame update
     void Start()
     {
@@ -34,17 +46,23 @@ public class InFlightMenuController : MonoBehaviour
         playerInput = FindObjectOfType<PlayerInput>();
         menuControls = playerInput.actions.FindActionMap(actionMapName);
         menuControls.Enable();
-        menuControls["Start Menu"].performed += ctx => StartSelect(ctx);
-        menuControls["GPS"].performed += ctx => GPSButton(ctx);
-        menuControls["Cluster"].performed += ctx => ClusterButton(ctx);
+        menuControls["Start Menu"].performed += StartSelect;
+        menuControls["GPS"].performed += GPSButton;
+        menuControls["Cluster"].performed += ClusterButton;
         
         // get menu containers
-        defaultMenu = transform.Find("Actions List");
-        instrumentListMenu = transform.Find("Instruments");
+        actionsMenu = transform.Find("Actions List");
         
-        defaultMenu.gameObject.SetActive(false);
+        _menuEnabler = actionsMenu.GetComponent<MenuEnabler>();
+        _menuEnabler.SetCancelCallback(DeactivateMenus);
+        _menuEnabler.SetIdleCallback(DeactivateMenus);
+        _menuEnabler.SetNavigationCallback(Navigate);
+        _menuEnabler.SetMenuClosedCallback(() => { });
+        _menuEnabler.IdleLimit = 10f;
+        
+        _selectables = _menuEnabler.BuildExplicitNavigation(actionsMenu.transform);
 
-        currentMenu = defaultMenu;
+        actionsMenu.gameObject.SetActive(false);
     }
 
     // Update is called once per frame
@@ -55,19 +73,20 @@ public class InFlightMenuController : MonoBehaviour
 
     public void StartSelect(InputAction.CallbackContext ctx)
     {
-        if (ctx.performed)
-        {
-            _menuOpen = !_menuOpen;
-            Debug.Log("Menu " + (_menuOpen ? "" : "not") + " open");
+        _menuOpen = !_menuOpen;
+        Debug.Log("Menu " + (_menuOpen ? "" : "not") + " open");
 
-            if (_menuOpen)
-            {
-                OpenMenu(currentMenu, defaultMenu.transform);
-            }
-            else
-            {
-                DeactivateMenus();
-            }
+        if (_menuOpen)
+        {
+            actionsMenu.gameObject.SetActive(true);
+            _menuEnabler.SetActive(true);
+            MenuEnabler.SetSelectedGameObject(_selectables[0].gameObject);
+        }
+        else
+        {
+            actionsMenu.gameObject.SetActive(false);
+            _menuEnabler.SetActive(false);
+            MenuEnabler.SetSelectedGameObject(null);
         }
     }
 
@@ -85,6 +104,19 @@ public class InFlightMenuController : MonoBehaviour
         clusterEvent.Raise();
     }
 
+    public void RepositionXR()
+    {
+        inFlightMenu.SetActive(false);
+        repositionInstructions.SetActive(true);
+        repositionController.MakeRepositionActive(CloseRepositionXR);
+    }
+
+    public void CloseRepositionXR()
+    {
+        inFlightMenu.SetActive(true);
+        repositionInstructions.SetActive(false);
+    }
+
     public void ReturnToPadButtonPressed()
     {
         Debug.Log("Return to pad button pressed!");
@@ -97,19 +129,41 @@ public class InFlightMenuController : MonoBehaviour
 
     private void DeactivateMenus()
     {
+        _menuOpen = false;
         for (int i = 0; i < transform.childCount; ++i)
         {
             transform.GetChild(i).gameObject.SetActive(false);
         }
     }
-
-    private void OpenMenu(Transform oldMenu, Transform newMenu)
+    
+    public void Navigate(Vector2 nav)
     {
-        oldMenu.gameObject.SetActive(false);
-        newMenu.gameObject.SetActive(true);
-        
-        currentMenu = newMenu;
-        EventSystem.current.SetSelectedGameObject(null);
-        EventSystem.current.SetSelectedGameObject(currentMenu.GetChild(0).gameObject);
+        // filter out <0, 0>
+        if (nav == Vector2.zero) return;
+
+        if (nav.y != 0)
+        {
+            if (nav.y < 0) IncrementSelectable();
+            else DecrementSelectable();
+            
+            SelectButton();
+        }
+    }
+
+    private void SelectButton()
+    {
+        MenuEnabler.SetSelectedGameObject(_selectables[_currentSelectable].gameObject);
+    }
+
+    private void IncrementSelectable()
+    {
+        ++_currentSelectable;
+        if (_currentSelectable >= _selectables.Count) _currentSelectable = 0;
+    }
+    
+    private void DecrementSelectable()
+    {
+        --_currentSelectable;
+        if (_currentSelectable < 0) _currentSelectable = _selectables.Count - 1;
     }
 }

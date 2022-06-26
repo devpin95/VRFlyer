@@ -217,7 +217,10 @@ public class VegetationManager : MonoBehaviour
             z = _procSeed.Range(zBounds.x, zBounds.y);
             // x = UnityEngine.Random.Range(xBounds.x, xBounds.y);
             // z = UnityEngine.Random.Range(zBounds.x, zBounds.y);
-                
+
+            // go to the next pos if there is water in the area
+            if ( _map.SampleWaterMap(Mathf.FloorToInt(x), Mathf.FloorToInt(z)) ) continue;
+
             // sample the height map for the raw height and scaled height
             // x [0,1], y [remapmin, remapmax]
             Vector2 ySamples = _map.SampleAndScaleHeightMap(x, z, 0, terrainInfo.MaxTerrainHeight());
@@ -277,7 +280,8 @@ public class VegetationManager : MonoBehaviour
             // true if the height of the chunk is <= heightCutoff
             float chunkHeight = _map.SampleAndScaleHeightMap(chunk.mapX, chunk.mapZ, 0, terrainInfo.MaxTerrainHeight());
             chunk.pos = new Vector3(chunk.pos.x, chunkHeight, chunk.pos.z);
-            chunk.valid = _map.SampleHeightMap(chunk.mapX, chunk.mapZ) <= vegetationInfo.chunkHeightCutoff;
+            chunk.valid = _map.SampleHeightMap(chunk.mapX, chunk.mapZ) <= vegetationInfo.chunkHeightCutoff && 
+                          !_map.SampleWaterMap(chunk.mapX, chunk.mapZ);
             
             if ( chunk.valid ) _validChunks.Add(chunk);
 

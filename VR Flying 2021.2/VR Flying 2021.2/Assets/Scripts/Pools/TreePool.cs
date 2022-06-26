@@ -48,16 +48,6 @@ public class TreePool : MonoBehaviour
 
     public GameObject RequestTreeInstance(Transform newParent)
     {
-        // foreach (var tree in trees)
-        // {
-        //     if (!tree.activeSelf)
-        //     {
-        //         tree.SetActive(true);
-        //         tree.transform.SetParent(newParent);
-        //         return tree;
-        //     }
-        // }
-
         GameObject tree = null;
         try
         {

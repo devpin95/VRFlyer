@@ -8,7 +8,6 @@ using UnityEngine.EventSystems;
 using UnityEngine.InputSystem;
 using UnityEngine.UI;
 
-[RequireComponent(typeof(CEventListener_MenuEnabler))]
 public class MenuEnabler : MonoBehaviour
 {
     public CEvent_MenuEnabler notifyMenuActive;

@@ -22,6 +22,7 @@ public class MeshManager : MonoBehaviour
     private VegetationManager _vegetationManager;
     private ProceduralSeed _procSeed;
     
+    
     private Mesh _mesh;
     private Vector3[] _vertices;
     private int[] _triangles;
@@ -37,6 +38,7 @@ public class MeshManager : MonoBehaviour
 
     [Header("Terrain")] 
     private GameObject _structureContainer;
+    private GameObject _waterBodyContainer;
 
     [Header("LOD Distances")] 
     private Transform playerTransform;
@@ -64,8 +66,9 @@ public class MeshManager : MonoBehaviour
     private Vector3 _repositionOffset = Vector3.zero;
     private Bounds _meshBounds;
 
-    private Queue<TerrainMap.MapGenerationOutput> _mapThreadResultQueue;
-    private Queue<MeshGenerationOutput> _meshThreadResultQueue;
+    private Queue<Terrain.Threading.TerrainMapGeneratorThread.MapGenerationOutput> _mapThreadResultQueue;
+    private Queue<Terrain.Threading.MeshBuilderThread.MeshGenerationOutput> _meshThreadResultQueue;
+    private Queue<Terrain.Threading.WaterBodyBuilderThread.WaterBuilderOutput> _waterThreadResultQueue;
 
     // flags
     private bool startup = true;
@@ -125,8 +128,9 @@ public class MeshManager : MonoBehaviour
         _terrainMaterial = GetComponent<MeshRenderer>().material;
         _gameData = GameObject.Find("Game Manager").GetComponent<GameManager>().gameData;
 
-        _mapThreadResultQueue = new Queue<TerrainMap.MapGenerationOutput>();
-        _meshThreadResultQueue = new Queue<MeshGenerationOutput>();
+        _mapThreadResultQueue = new Queue<Terrain.Threading.TerrainMapGeneratorThread.MapGenerationOutput>();
+        _meshThreadResultQueue = new Queue<Terrain.Threading.MeshBuilderThread.MeshGenerationOutput>();
+        _waterThreadResultQueue = new Queue<Terrain.Threading.WaterBodyBuilderThread.WaterBuilderOutput>();
 
         playerTransform = FindObjectOfType<WorldRepositionManager>().playerTransform;
 
@@ -145,14 +149,20 @@ public class MeshManager : MonoBehaviour
 
         LOD = LODUtility.LowestLOD(terrainInfo).lod;
         _initializedMeshes = new bool[LODUtility.MaxLODCount()]; // initialize them all to false
-        _meshLODs = new LODMesh[LODUtility.MaxLODCount()];
-        _meshDataArray = Mesh.AllocateWritableMeshData(LODUtility.MaxLODCount());
+        _meshLODs = new LODMesh[LODUtility.MaxLODCount() + 1]; // add 1 mesh for bodies of water
+        _meshDataArray = Mesh.AllocateWritableMeshData(LODUtility.MaxLODCount() + 1);
         
         // create an empty gameobject to hold all of the structures for a given terrain
         _structureContainer = new GameObject();
         _structureContainer.transform.position = Vector3.zero;
         _structureContainer.transform.SetParent(transform, worldPositionStays: false);
         _structureContainer.transform.name = "Structures";
+        
+        // create an empty gameobject to hold all of the structures for a given terrain
+        _waterBodyContainer = new GameObject();
+        _waterBodyContainer.transform.position = Vector3.zero;
+        _waterBodyContainer.transform.SetParent(transform, worldPositionStays: false);
+        _waterBodyContainer.transform.name = "Bodies of Water";
 
         _vegetationManager = GetComponent<VegetationManager>();
         
@@ -176,13 +186,19 @@ public class MeshManager : MonoBehaviour
         if (_mapThreadResultQueue.Count > 0)
         {
             // if there is, dequeue the data and invoke it's callback with the data
-            TerrainMap.MapGenerationOutput output = _mapThreadResultQueue.Dequeue();
+            Terrain.Threading.TerrainMapGeneratorThread.MapGenerationOutput output = _mapThreadResultQueue.Dequeue();
             output.callback(output, false);
         }
         if (_meshThreadResultQueue.Count > 0)
         {
-            MeshGenerationOutput output = _meshThreadResultQueue.Dequeue();
+            Terrain.Threading.MeshBuilderThread.MeshGenerationOutput output = _meshThreadResultQueue.Dequeue();
             output.callback(output, true);
+        }
+
+        if (_waterThreadResultQueue.Count > 0)
+        {
+            Terrain.Threading.WaterBodyBuilderThread.WaterBuilderOutput output = _waterThreadResultQueue.Dequeue();
+            output.callback(output);
         }
 
         distanceFromPlayer = Mathf.Sqrt(_meshBounds.SqrDistance(playerTransform.position));
@@ -245,7 +261,7 @@ public class MeshManager : MonoBehaviour
             else
             {
                 // set up a stub of the information we would have gotten from the map generation thread
-                TerrainMap.MapGenerationOutput meshGenerationInfoStub = new TerrainMap.MapGenerationOutput();
+                Terrain.Threading.TerrainMapGeneratorThread.MapGenerationOutput meshGenerationInfoStub = new Terrain.Threading.TerrainMapGeneratorThread.MapGenerationOutput();
                 meshGenerationInfoStub.map = _terrainMap.Get2DHeightMap();
                 meshGenerationInfoStub.min = _terrainMap.MapMin();
                 meshGenerationInfoStub.max = _terrainMap.MapMax();
@@ -329,9 +345,10 @@ public class MeshManager : MonoBehaviour
         worldOffset = nworldOffset;
 
         _procSeed.InitState(RNGSalt());
-        _terrainMap.SetTerrainAttribute(TerrainMap.TerrainAttributes.HAS_LAKE, _procSeed.Range(0f, 1f) < terrainInfo.pLakeSpawn);
-        _terrainMap.SetTerrainAttribute(TerrainMap.TerrainAttributes.HAS_SPLIT_LAKE, false);
-        _terrainMap.SetTerrainAttribute(TerrainMap.TerrainAttributes.HAS_TOWN, false);
+        _terrainMap.SetTerrainAttribute(TerrainMap.Attributes.HAS_LAKE, _procSeed.Range(0f, 1f) < terrainInfo.pLakeSpawn);
+        _terrainMap.SetTerrainAttribute(TerrainMap.Attributes.HAS_SPLIT_LAKE, false);
+        _terrainMap.SetTerrainAttribute(TerrainMap.Attributes.HAS_TOWN, false);
+        _terrainMap.SetTerrainAttribute(TerrainMap.Attributes.LAKE_TYPES, TerrainMap.TerrainAttributes.defaultLakeTypes);
 
         _terrainMap.nonContributingBiomes = terrainInfo.GetNonContributingBiomes();
         _terrainMap.contributingBiomes = terrainInfo.GetContributingBiomes();
@@ -341,26 +358,43 @@ public class MeshManager : MonoBehaviour
         _terrainMap.RequestMap( callback: MapGenerationReceived, _mapThreadResultQueue);
     }
 
-    private void MapGenerationReceived(TerrainMap.MapGenerationOutput output, bool stub = false)
+    private void MapGenerationReceived(Terrain.Threading.TerrainMapGeneratorThread.MapGenerationOutput output, bool stub = false)
     {
         StartCoroutine(MapGenerationCoroutine(output, stub));
     }
 
-    IEnumerator MapGenerationCoroutine(TerrainMap.MapGenerationOutput mapGenerationOutput, bool stub = false)
+    IEnumerator MapGenerationCoroutine(Terrain.Threading.TerrainMapGeneratorThread.MapGenerationOutput mapGenerationOutput, bool stub = false)
     {
         if (!stub)
         {
             // if we get in here, then the caller of this function was the thread that generated the map
             // NOT the manager wanting a new LOD of the same map
             _terrainMap.SetMap(mapGenerationOutput.map, mapGenerationOutput.min, mapGenerationOutput.max, mapGenerationOutput.minpos, mapGenerationOutput.maxpos);
+            _terrainMap.SetWaterMap(mapGenerationOutput.water);
             _terrainMap.mean = mapGenerationOutput.mean;
             _terrainMap.variance = mapGenerationOutput.variance;
             _terrainMap.stdDev = mapGenerationOutput.stdDev;
             _terrainMap.generatedAttributes = mapGenerationOutput.attributes;
          
-            if (mapGenerationOutput.attributes[(int)TerrainMap.TerrainAttributes.HAS_LAKE])
+            // check if the terrain generated a body of water
+            if (mapGenerationOutput.attributes.conditions[(int)TerrainMap.Attributes.HAS_LAKE])
             {
+                // if the terrain has a body of water, we need to start another thread that will generate the vertices
+                // we need to build a water mesh
                 Debug.Log(transform.name + " has generated a lake");
+                Terrain.Threading.WaterBodyBuilderThread.WaterBuilderInput waterBuilderInput = new Terrain.Threading.WaterBodyBuilderThread.WaterBuilderInput(
+                    mapGenerationOutput.water,
+                    mapGenerationOutput.waterElevation * terrainInfo.MaxTerrainHeight(),
+                    terrainInfo.meshVerts,
+                    vertScale: terrainInfo.vertexScale,
+                    ref _meshDataArray
+                );
+                Terrain.Threading.WaterBodyBuilderThread waterBuilderThread = new Terrain.Threading.WaterBodyBuilderThread(ref waterBuilderInput, _waterThreadResultQueue, WaterGenerationReceived);
+        
+                yield return null;
+        
+                ThreadPool.QueueUserWorkItem(delegate { waterBuilderThread.ThreadProc(); });
+                
             }
         }
 
@@ -370,7 +404,7 @@ public class MeshManager : MonoBehaviour
         
         // set up the mesh generation input
         int meshDim = (terrainInfo.meshVerts - 1) / LODUtility.LODToMeshResolution(LOD) + 1;
-        MeshGenerationInput meshGenerationInput = new MeshGenerationInput(
+        Terrain.Threading.MeshBuilderThread.MeshGenerationInput meshGenerationInput = new Terrain.Threading.MeshBuilderThread.MeshGenerationInput(
             _terrainMap, 
             meshDim, 
             terrainInfo.vertexScale, 
@@ -385,7 +419,7 @@ public class MeshManager : MonoBehaviour
         // ** thread pool **
         // -------------------------------------------------------------------------------------------------------------
         // // make the new builder thread object with the input, the output queue, and the callback we need to invoke
-        MeshBuilderThread builderThread = new MeshBuilderThread(ref meshGenerationInput, _meshThreadResultQueue, MeshGenerationReceived);
+        Terrain.Threading.MeshBuilderThread builderThread = new Terrain.Threading.MeshBuilderThread(ref meshGenerationInput, _meshThreadResultQueue, MeshGenerationReceived);
         
         yield return null;
         
@@ -394,12 +428,12 @@ public class MeshManager : MonoBehaviour
         yield return null;
     }
     
-    private void MeshGenerationReceived(MeshGenerationOutput meshGenerationOutput, bool reposition = true)
+    private void MeshGenerationReceived(Terrain.Threading.MeshBuilderThread.MeshGenerationOutput meshGenerationOutput, bool reposition = true)
     {
         StartCoroutine(MeshGenerationCoroutine(meshGenerationOutput));
     }
 
-    IEnumerator MeshGenerationCoroutine(MeshGenerationOutput generationOutput)
+    IEnumerator MeshGenerationCoroutine(Terrain.Threading.MeshBuilderThread.MeshGenerationOutput generationOutput)
     {
         int targetLod = generationOutput.targetLod; // make a copy of this so everything is easier to read later
 
@@ -410,8 +444,8 @@ public class MeshManager : MonoBehaviour
 
         yield return null;
         
-        NativeArray<float3> targetVerts = generationOutput.meshDataArray[targetLod].GetVertexData<float3>((int)MeshBuilderThread.MeshDataStreams.Vertices);
-        NativeArray<float2> targetUVs = generationOutput.meshDataArray[targetLod].GetVertexData<float2>((int)MeshBuilderThread.MeshDataStreams.UVs);
+        NativeArray<float3> targetVerts = generationOutput.meshDataArray[targetLod].GetVertexData<float3>((int)Terrain.Threading.MeshBuilderThread.MeshDataStreams.Vertices);
+        NativeArray<float2> targetUVs = generationOutput.meshDataArray[targetLod].GetVertexData<float2>((int)Terrain.Threading.MeshBuilderThread.MeshDataStreams.UVs);
         NativeArray<uint> targetIndices = generationOutput.meshDataArray[targetLod].GetIndexData<uint>();
         
         _meshLODs[targetLod].mesh.SetVertices(targetVerts, 0, targetVerts.Length, MeshUpdateFlags.DontRecalculateBounds | MeshUpdateFlags.DontValidateIndices);
@@ -486,7 +520,49 @@ public class MeshManager : MonoBehaviour
             startup = false;
         }
     }
-    
+
+    private void WaterGenerationReceived(Terrain.Threading.WaterBodyBuilderThread.WaterBuilderOutput waterBuilderOutput)
+    {
+        Debug.Log("Water body builder output received...");
+        StartCoroutine(WaterMeshGenerationCoroutine(waterBuilderOutput));
+    }
+
+    IEnumerator WaterMeshGenerationCoroutine(Terrain.Threading.WaterBodyBuilderThread.WaterBuilderOutput waterBuilderOutput)
+    {
+        var waterBody = WaterBodyPool.Instance.RequestWaterBodyInstance(_waterBodyContainer.transform);
+
+        // if we couldnt get a water body object, then just exit
+        if (waterBody == null) yield break;
+        
+        waterBody.transform.localPosition = Vector3.zero;
+
+        int targetLod = _meshLODs.Length - 1;
+        
+        if (_meshLODs[targetLod].instance == null) CreateMeshLODGameObject(targetLod);
+        else _meshLODs[targetLod].mesh.Clear();
+
+        yield return null;
+        
+        NativeArray<float3> targetVerts = waterBuilderOutput.meshDataArray[targetLod].GetVertexData<float3>((int)Terrain.Threading.WaterBodyBuilderThread.MeshDataStreams.Vertices);
+        NativeArray<float2> targetUVs = waterBuilderOutput.meshDataArray[targetLod].GetVertexData<float2>((int)Terrain.Threading.WaterBodyBuilderThread.MeshDataStreams.UVs);
+        NativeArray<uint> targetIndices = waterBuilderOutput.meshDataArray[targetLod].GetIndexData<uint>();
+        
+        Debug.Log("Building water body mesh with " + targetVerts.Length + " verts, " + targetIndices.Length + " tris...");
+        
+        _meshLODs[targetLod].mesh.SetVertices(targetVerts, 0, targetVerts.Length, MeshUpdateFlags.DontRecalculateBounds | MeshUpdateFlags.DontValidateIndices);
+        yield return null;
+        _meshLODs[targetLod].mesh.SetUVs(0, targetUVs);
+        yield return null;
+        _meshLODs[targetLod].mesh.SetIndices(targetIndices, MeshTopology.Triangles, 0, calculateBounds: false);
+        yield return null;
+        _meshLODs[targetLod].mesh.RecalculateBounds();
+        yield return null;
+        _meshLODs[targetLod].mesh.RecalculateNormals();
+
+        waterBody.GetComponent<MeshFilter>().sharedMesh = _meshLODs[targetLod].mesh;
+        yield return null;
+        waterBody.GetComponent<MeshCollider>().sharedMesh = _meshLODs[targetLod].mesh;
+    }
     // -----------------------------------------------------------------------------------------------------------------
     // -----------------------------------------------------------------------------------------------------------------
     // -----------------------------------------------------------------------------------------------------------------
@@ -621,12 +697,6 @@ public class MeshManager : MonoBehaviour
         LOD = lod;
     }
 
-    public void ButtonTest()
-    {
-        Debug.Log("Building terrain");
-        BuildTerrain();
-    }
-
     public void SetGridPosition(IntVector2 pos)
     {
         previousGridOffset = gridOffset;
@@ -639,307 +709,17 @@ public class MeshManager : MonoBehaviour
         {
             Destroy(_structureContainer.transform.GetChild(i).gameObject);
         }
+        
+        // relinquish all of the bodies of water that were allocated to the previous terrain chunk
+        int waterBodyCount = _waterBodyContainer.transform.childCount;
+        for (int i = waterBodyCount - 1; i >= 0; --i)
+        {
+            WaterBodyPool.Instance.RelinquishWaterBodyInstance(_waterBodyContainer.transform.GetChild(i).gameObject);
+        }
 
         newGridPos = true;
     }
 
-    public struct MeshGenerationOutput
-    {
-        public Vector3[] vertices;
-        public int[] triangles;
-        public Vector2[] uvs;
-        public Mesh.MeshDataArray meshDataArray;
-        public int targetLod;
-
-        public Action<MeshGenerationOutput, bool> callback;
-
-        public void SetMeshDataArray(ref Mesh.MeshDataArray meshDataArray)
-        {
-            this.meshDataArray = meshDataArray;
-        }
-    }
-
-    public struct MeshGenerationInput
-    {
-        public TerrainMap map;
-        public int dim;
-        public float vertexScale;
-        public float remapMin;
-        public float remapMax;
-        public AnimationCurve terrainCurve;
-        public int resolution;
-        public Mesh.MeshDataArray meshDataArray;
-
-        public MeshGenerationInput(TerrainMap map, int dim, float vertexScale, float remapMin, float remapMax, AnimationCurve terrainCurve, int resolution, ref Mesh.MeshDataArray meshDataArray)
-        {
-            this.map = map;
-            this.dim = dim;
-            this.vertexScale = vertexScale;
-            this.remapMin = remapMin;
-            this.remapMax = remapMax;
-            this.terrainCurve = terrainCurve;
-            this.resolution = resolution;
-            this.meshDataArray = meshDataArray;
-        }
-    }
-    
-    private class MeshBuilderThread
-    {
-        public enum MeshDataStreams : int
-        {
-            Vertices = 0,
-            UVs = 1
-        }
-        
-        private MeshGenerationInput meshInfo;
-        private Queue<MeshGenerationOutput> resultQ;
-        private Action<MeshGenerationOutput, bool> callback;
-        private MeshGenerationOutput meshGenerationOutput;
-        private NativeArray<VertexAttributeDescriptor> meshVertexAttributes; 
-        
-        public MeshBuilderThread(ref MeshGenerationInput meshInfo, Queue<MeshGenerationOutput> resultQ, Action<MeshGenerationOutput, bool> callback)
-        {
-            this.meshInfo = meshInfo;
-            this.resultQ = resultQ;
-            this.callback = callback;
-        }
-
-        public void ThreadProc()
-        {
-            meshGenerationOutput = new MeshGenerationOutput();
-            meshGenerationOutput.callback = callback;
-            meshGenerationOutput.meshDataArray = meshInfo.meshDataArray;
-            meshGenerationOutput.targetLod = LODUtility.MeshResolutionToLOD(meshInfo.resolution);
-            // meshGenerationOutput.SetMeshDataArray(ref meshDataArray);
-
-            // Debug.Log("Mesh Done");
-            
-            SetVertexDescriptors();
-            int targetLOD = LODUtility.MeshResolutionToLOD(meshInfo.resolution);
-            Mesh.MeshData data = meshInfo.meshDataArray[targetLOD];
-            data.SetVertexBufferParams(meshInfo.map.GetVertexArraySizeAtLOD(meshInfo.resolution), meshVertexAttributes);
-            data.SetIndexBufferParams(meshInfo.map.GetIndexArraySizeAtLOD(meshInfo.resolution), IndexFormat.UInt32);
-            meshVertexAttributes.Dispose();
-            
-            
-            // CreateVerts();
-            CreateVertsNative(data);
-            // CreateTris();
-            CreateTrisNative(data);
-            // CreateUVs();
-            CreateUVsNative(data);
-
-            // Debug.Log("Mesh will have verts[" + meshInfo.dim * meshInfo.dim + "] tris[" + (meshInfo.dim - 1) * (meshInfo.dim - 1) + "] uvs[" + meshGenerationOutput.uvs.Length + "]");
-
-            data.subMeshCount = 1;
-            MeshUpdateFlags smflags = MeshUpdateFlags.DontRecalculateBounds | MeshUpdateFlags.DontValidateIndices | MeshUpdateFlags.DontNotifyMeshUsers;
-            SubMeshDescriptor smdes = new SubMeshDescriptor(0, meshInfo.map.GetIndexArraySizeAtLOD(meshInfo.resolution));
-            data.SetSubMesh(0, smdes, smflags);
-
-            lock (resultQ) resultQ.Enqueue(meshGenerationOutput);
-        }
-        
-        private void CreateVerts()
-        {
-            Debug.Log(meshInfo.map);
-            meshGenerationOutput.vertices = meshInfo.map.GetRemappedFlattenedVectorMap(
-                    vertScale: meshInfo.vertexScale, 
-                    min: meshInfo.remapMin, 
-                    max: meshInfo.remapMax, 
-                    curve: meshInfo.terrainCurve, 
-                    lod: meshInfo.resolution
-                );
-        }
-
-        private void CreateVertsNative(Mesh.MeshData data)
-        {
-            var vertdata = data.GetVertexData<float3>();
-            // meshInfo.map.GetVectorMapNative(
-            //     nativeMap: ref vertdata,
-            //     vertScale: meshInfo.vertexScale, 
-            //     min: meshInfo.remapMin, 
-            //     max: meshInfo.remapMax, 
-            //     curve: meshInfo.terrainCurve, 
-            //     lod: meshInfo.resolution
-            // );
-            meshInfo.map.GetVectorMapNative(nativeMap: ref vertdata, meshInfo.vertexScale, meshInfo.remapMax, meshInfo.resolution);
-        }
-    
-        private void CreateTris()
-        {
-            List<int> trilist = new List<int>();
-            
-            int width = meshInfo.dim - 1;
-            
-            for( int z = 0; z < width; ++z )
-            {
-                int offset = z * (width + 1); // offset
-                for (int x = 0; x < width; ++x)
-                {
-                    int bl = x + offset;
-                    int tl = x + width + offset + 1;
-                    int tr = x + width + offset + 2;
-                    int br = x + offset + 1;
-                
-                    // left tri
-                    trilist.Add(tl);
-                    trilist.Add(br);
-                    trilist.Add(bl);
-
-                    // right tri
-                    trilist.Add(tl);
-                    trilist.Add(tr);
-                    trilist.Add(br);
-                }
-            }
-        
-            // Debug.Log("Mesh has " + trilist.Count / 3 + " triangles");
-            meshGenerationOutput.triangles = trilist.ToArray();
-        }
-
-        private void CreateTrisNative(Mesh.MeshData data)
-        {
-            var trilist = data.GetIndexData<uint>();
-            uint width = (uint)meshInfo.dim - 1;
-            int index = 0;
-            
-            for( uint z = 0; z < width; ++z )
-            {
-                uint offset = z * (width + 1); // offset
-                for (uint x = 0; x < width; ++x)
-                {
-                    uint bl = x + offset;
-                    uint tl = x + width + offset + 1;
-                    uint tr = x + width + offset + 2;
-                    uint br = x + offset + 1;
-                
-                    // left tri
-                    trilist[index++] = tl;
-                    trilist[index++] = br;
-                    trilist[index++] = bl;
-
-                    // right tri
-                    trilist[index++] = tl;
-                    trilist[index++] = tr;
-                    trilist[index++] = br;
-                }
-            }
-        }
-        
-        private void CreateUVs( )
-        {
-            meshGenerationOutput.uvs = new Vector2[meshGenerationOutput.vertices.Length];
-
-            for (int i = 0; i < meshGenerationOutput.vertices.Length; ++i)
-            {
-                meshGenerationOutput.uvs[i] = new Vector2(meshGenerationOutput.vertices[i].x, meshGenerationOutput.vertices[i].z);
-            }
-        }
-
-        private void CreateUVsNative(Mesh.MeshData data)
-        {
-            var uvs = data.GetVertexData<float2>(1);
-            int dim = meshInfo.map.GetMeshDimAtLOD(meshInfo.resolution);
-            int i = 0;
-
-            for (int z = 0; z < dim; ++z)
-            {
-                for (int x = 0; x < dim; ++x)
-                {
-                    uvs[i] = new float2(x * meshInfo.vertexScale, z * meshInfo.vertexScale);
-                    ++i;
-                }
-            }
-        }
-
-        private void SetVertexDescriptors()
-        {
-            // make temp vertex attribute descriptors for vertex position and UV streams
-            VertexAttributeDescriptor vertexPositionStream = new VertexAttributeDescriptor(VertexAttribute.Position, dimension: 3); // stream 0
-            VertexAttributeDescriptor vertexUvStream = new VertexAttributeDescriptor(VertexAttribute.TexCoord0, dimension: 2, stream: 1); // stream 1
-            int vertexAttributeCount = 2;
-        
-            // set up the mesh vertex attributes position stream and UV stream
-            meshVertexAttributes = new NativeArray<VertexAttributeDescriptor>(vertexAttributeCount, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
-            meshVertexAttributes[0] = vertexPositionStream;
-            meshVertexAttributes[1] = vertexUvStream;
-        }
-    }
-
-    public struct MeshBuilderIJob : IJob
-    {
-        public MeshGenerationInput meshInfo;
-        public Queue<MeshGenerationOutput> resultQ;
-        public Action<MeshGenerationOutput, bool> callback;
-        public MeshGenerationOutput meshGenerationOutput;
-        
-        public void Execute()
-        {
-            meshGenerationOutput = new MeshGenerationOutput();
-            meshGenerationOutput.callback = callback;
-
-            CreateVerts();
-            CreateTris();
-            CreateUVs();
-            
-            lock (resultQ) resultQ.Enqueue(meshGenerationOutput);
-        }
-        
-        private void CreateVerts()
-        {
-            Debug.Log(meshInfo.map);
-            meshGenerationOutput.vertices = meshInfo.map.GetRemappedFlattenedVectorMap(
-                vertScale: meshInfo.vertexScale, 
-                min: meshInfo.remapMin, 
-                max: meshInfo.remapMax, 
-                curve: meshInfo.terrainCurve, 
-                lod: meshInfo.resolution
-            );
-        }
-    
-        private void CreateTris()
-        {
-            List<int> trilist = new List<int>();
-            
-            int width = meshInfo.dim - 1;
-            
-            for( int z = 0; z < width; ++z )
-            {
-                int offset = z * (width + 1); // offset
-                for (int x = 0; x < width; ++x)
-                {
-                    int bl = x + offset;
-                    int tl = x + width + offset + 1;
-                    int tr = x + width + offset + 2;
-                    int br = x + offset + 1;
-                
-                    // left tri
-                    trilist.Add(tl);
-                    trilist.Add(br);
-                    trilist.Add(bl);
-
-                    // right tri
-                    trilist.Add(tl);
-                    trilist.Add(tr);
-                    trilist.Add(br);
-                }
-            }
-        
-            // Debug.Log("Mesh has " + trilist.Count / 3 + " triangles");
-            meshGenerationOutput.triangles = trilist.ToArray();
-        }
-
-        private void CreateUVs( )
-        {
-            meshGenerationOutput.uvs = new Vector2[meshGenerationOutput.vertices.Length];
-
-            for (int i = 0; i < meshGenerationOutput.vertices.Length; ++i)
-            {
-                meshGenerationOutput.uvs[i] = new Vector2(meshGenerationOutput.vertices[i].x, meshGenerationOutput.vertices[i].z);
-            }
-        }
-    }
-    
     private void OnDrawGizmosSelected()
     {
         // float width = meshSquares * vertexScale;
@@ -970,57 +750,3 @@ public class MeshManager : MonoBehaviour
         Handles.Label(new Vector3(750, 825, 0), "max: " + _terrainMap.MapMax().ToString("n4"));
     }
 }
-
-// [CustomEditor(typeof(MeshManager))]
-// public class SomeScriptEditor : Editor 
-// {
-//     MeshManager manager;
-//     private SerializedProperty gridOffset;
-//     private SerializedProperty heightMapSprite;
-//     private SerializedProperty debugImg;
-//     private SerializedProperty heightMapTex;
-//     private SerializedProperty altitudeTex;
-//     private SerializedProperty normalTex;
-//
-//     void OnEnable()
-//     {
-//         gridOffset = serializedObject.FindProperty("gridOffset");
-//         heightMapSprite = serializedObject.FindProperty("_heightMapSprite");
-//         debugImg = serializedObject.FindProperty("img");
-//         heightMapTex = serializedObject.FindProperty("heightMapTex");
-//         altitudeTex = serializedObject.FindProperty("altitudeMapTex");
-//         normalTex = serializedObject.FindProperty("normalMapTex");
-//     }
-//     
-//     public override void OnInspectorGUI()
-//     {
-//         serializedObject.Update();
-//         
-//         MeshManager script = (MeshManager) target;
-//         if (GUILayout.Button("Preview Maps"))
-//         {
-//             script.ButtonTest();
-//             EditorUtility.SetDirty(script);
-//             serializedObject.Update();
-//         }
-//
-//         // EditorGUILayout.ObjectField("Height Map", heightMapSprite.objectReferenceValue, typeof(Sprite), false);
-//         
-//         if ( heightMapTex.objectReferenceValue ) EditorGUI.DrawPreviewTexture(new Rect(20, 30, 150, 150), (Texture2D) heightMapTex.objectReferenceValue);
-//         if ( altitudeTex.objectReferenceValue ) EditorGUI.DrawPreviewTexture(new Rect(20 + 150 + 5, 30, 150, 150), (Texture2D) altitudeTex.objectReferenceValue);
-//         if ( normalTex.objectReferenceValue ) EditorGUI.DrawPreviewTexture(new Rect(20 + 150 + 5 + 150 + 5, 30, 150, 150), (Texture2D) normalTex.objectReferenceValue);
-//         // float val = EditorGUIUtility.currentViewWidth / 150;
-//         // EditorGUI.PrefixLabel(new Rect(25, 180, 100, 15), 0, new GUIContent(val.ToString("n2")));
-//             
-//         // EditorGUI.DrawPreviewTexture(new Rect(20 + 150 + 5, 30, 150, 150), (Texture2D) heightMapTex.objectReferenceValue);
-//         // EditorGUI.DrawPreviewTexture(new Rect(20 + 150 + 5 + 150 + 5, 30, 150, 150), (Texture2D) heightMapTex.objectReferenceValue);
-//
-//         EditorGUILayout.Space(170);
-//
-//         DrawDefaultInspector();
-//             
-//         serializedObject.ApplyModifiedProperties();
-//         
-//         // DrawDefaultInspector();
-//     }
-// }

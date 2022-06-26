@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.ComponentModel.Design.Serialization;
 using System.Runtime.ConstrainedExecution;
 using System.Threading;
+using OpenCover.Framework.Model;
 using Unity.Collections;
 using Unity.Jobs;
 using UnityEngine;
@@ -28,6 +29,7 @@ public class TerrainMap
     private NativeArray<float> nativemax;
     
     private float[,] heightmap = null;
+    private bool[,] watermap = null;
     private int mapverts = 256;
     private int mapsquares = 255;
     public IntVector2 offset;
@@ -50,26 +52,30 @@ public class TerrainMap
     public float maxHeight;
 
     public List<Texture2D> biomeMaps = new List<Texture2D>();
-    public bool[] terrainAttributes =
-    {
-        false, // has lake
-        false, // has split lakes
-        false, // has town
-    };
-    
-    public bool[] generatedAttributes =
-    {
-        false, // has lake
-        false, // has split lakes
-        false, // has town
-    };
 
-    public enum TerrainAttributes
+    public class TerrainAttributes
+    {
+        public static List<int> defaultLakeTypes = new List<int>() { 0 };
+        public bool[] conditions =
+        {
+            false, // has lake
+            false, // has split lakes
+            false, // has town
+        };
+
+        public List<int> lakeTypes;
+    }
+
+    public enum Attributes
     {
         HAS_LAKE = 0,
         HAS_SPLIT_LAKE = 1,
-        HAS_TOWN = 2
+        HAS_TOWN = 2,
+        LAKE_TYPES = 3
     }
+
+    public TerrainAttributes terrainAttributes = new TerrainAttributes();
+    public TerrainAttributes generatedAttributes;
 
     public struct Debug_MapBiomes
     {
@@ -98,7 +104,9 @@ public class TerrainMap
         miny = float.MaxValue;
         minypos = Vector2.negativeInfinity;
 
-        for (int i = 0; i < terrainAttributes.Length; ++i) terrainAttributes[i] = false;
+        // reset the terrain attribute conditions
+        for (int i = 0; i < terrainAttributes.conditions.Length; ++i) terrainAttributes.conditions[i] = false;
+        terrainAttributes.lakeTypes = new List<int> {1};
     }
     
     public void SetMap(float[,] map, float min, float max, Vector2 minpos, Vector2 maxpos)
@@ -116,27 +124,55 @@ public class TerrainMap
         maxypos = maxpos;
     }
     
-    public void RequestMap(Action<MapGenerationOutput, bool> callback, Queue<MapGenerationOutput> queue)
+    public void SetWaterMap(bool[,] map)
+    {
+        if (map.GetLength(0) != mapverts)
+        {
+            Debug.LogError("Map does not match the dimensions of the current object");
+            return;
+        }
+        
+        watermap = map;
+
+    }
+    
+    public void RequestMap(Action<Terrain.Threading.TerrainMapGeneratorThread.MapGenerationOutput, bool> callback, Queue<Terrain.Threading.TerrainMapGeneratorThread.MapGenerationOutput> queue)
     {
         // this function will package map generation info together into an object that will be stored in an object
         // with a function to be run in a thread. The result of the thread will be send to the callback action passed
         // in to this function
         
         // package the generation info together and make a new threaded terrain map object to hold that info
-        MapGenerationInput mapGenerationData = new MapGenerationInput(mapverts, offset, contributingBiomes, terrainAttributes, maxHeight);
-        TerrainMapThreaded threadedTerrainMap = new TerrainMapThreaded(mapGenerationData, callback, queue);
-        ThreadPool.QueueUserWorkItem(delegate { threadedTerrainMap.ThreadProc(); });
+        Terrain.Threading.TerrainMapGeneratorThread.MapGenerationInput mapGenerationData = new Terrain.Threading.TerrainMapGeneratorThread.MapGenerationInput(mapverts, offset, contributingBiomes, terrainAttributes, maxHeight);
+        Terrain.Threading.TerrainMapGeneratorThread generatorThreadTerrainMapGenerator = new Terrain.Threading.TerrainMapGeneratorThread(mapGenerationData, callback, queue);
+        ThreadPool.QueueUserWorkItem(delegate { generatorThreadTerrainMapGenerator.ThreadProc(); });
 
     }
 
-    public void SetTerrainAttribute(TerrainAttributes attr, bool s)
+    public void SetTerrainAttribute<T>(Attributes attr, T s)
     {
-        terrainAttributes[(int)attr] = s;
+        var data = (object)s;
+        switch (attr)
+        {
+            case Attributes.HAS_LAKE:
+            case Attributes.HAS_TOWN:
+            case Attributes.HAS_SPLIT_LAKE:
+                terrainAttributes.conditions[(int)attr] = (bool)data;
+                break;
+            case Attributes.LAKE_TYPES:
+                terrainAttributes.lakeTypes = (List<int>)data;
+                break;
+        }
     }
 
     public float SampleHeightMap(int x, int y)
     {
         return heightmap[x, y];
+    }
+
+    public bool SampleWaterMap(int x, int y)
+    {
+        return watermap[x, y];
     }
 
     public float SampleAndScaleHeightMap(int x, int z, float remapmin, float remapmax)
@@ -460,6 +496,43 @@ public class TerrainMap
             biomeMaps.Add(debugHeightMap);
             biomeMaps.Add(debugWeightMap);
         }
+        
+        // -------------------------------------------------------------------------------------------------------------
+        Color[] heightMap = new Color[heightmap.Length];
+
+        for (int i = 0; i < heightmap.Length; ++i)
+        {
+            int y = i / mapverts; // integer division, we want the truncated int here
+            int x = i % mapverts; // we want the column of the current row
+
+            if (heightmap[x, y] > 1) heightMap[i] = new Color(255, 0, 0);
+            else if (heightmap[x, y] < 0) heightMap[i] = new Color(0, 255, 0);
+            else heightMap[i] = new Color(heightmap[x, y], heightmap[x, y], heightmap[x, y]);   
+        }
+        
+        Texture2D debugTerrainHeightMap = new Texture2D(mapverts, mapverts);
+        debugTerrainHeightMap.SetPixels(heightMap);
+        debugTerrainHeightMap.Apply();
+        
+        biomeMaps.Add(debugTerrainHeightMap);
+        
+        // -------------------------------------------------------------------------------------------------------------
+        Color[] waterMap = new Color[heightmap.Length];
+
+        for (int i = 0; i < heightmap.Length; ++i)
+        {
+            int y = i / mapverts; // integer division, we want the truncated int here
+            int x = i % mapverts; // we want the column of the current row
+            
+            if ( watermap[x, y] ) heightMap[i] = new Color(0, 0, 255, 255);
+            else waterMap[i] = new Color(0, 0, 0, 255);
+        }
+        
+        Texture2D debugWaterMap = new Texture2D(mapverts, mapverts);
+        debugWaterMap.SetPixels(waterMap);
+        debugWaterMap.Apply();
+        
+        biomeMaps.Add(debugWaterMap);
     }
     
     public float SampleOctavePerlinNoise(int x, int z, int xoffset, int zoffset, float chunkSize)
@@ -697,134 +770,7 @@ public class TerrainMap
     // -----------------------------------------------------------------------------------------------------------------
     // -----------------------------------------------------------------------------------------------------------------
     // -----------------------------------------------------------------------------------------------------------------
-
-    public struct MapGenerationInput
-    {
-        // this class holds the information needed to generate a 2D map of octave perlin noise
-        
-        public IntVector2 offset;
-        public int mapverts;
-        public List<Biome> biomes;
-        public float maxHeight;
-        public bool[] attributes;
-        
-        public MapGenerationInput(int mapverts, IntVector2 offset, List<Biome> biomes, bool[] attributes, float maxHeight)
-        {
-            this.mapverts = mapverts;
-            this.offset = offset;
-            this.biomes = biomes;
-            this.attributes = attributes;
-            this.maxHeight = maxHeight;
-        }
-    }
-
-    public struct MapGenerationOutput
-    {
-        // this class holds the 2D map of octave perlin noise generated by the Noise class
-        public float[,] map;
-        public float[,] water;
-        public float min;
-        public float max;
-        public Vector2 minpos;
-        public Vector2 maxpos;
-        public float mean;
-        public float variance;
-        public float stdDev;
-        public Action<MapGenerationOutput, bool> callback;
-        public bool[] attributes;
-    }
-
-    private class TerrainMapThreaded
-    {
-        // TerrainMapThreaded will enable the generation of a 2D noise map on a thread instead of on the main Unity thread
-        // and will improve performance when a new map needs to be generated
-        private MapGenerationInput generationInput;
-        private Action<MapGenerationOutput, bool> _callback;
-        private Queue<MapGenerationOutput> _resultQ;
-
-        public TerrainMapThreaded(MapGenerationInput input, Action<MapGenerationOutput, bool> callback, Queue<MapGenerationOutput> q)
-        {
-            generationInput = input;
-            _callback = callback;
-            _resultQ = q;
-        }
-
-        public void ThreadProc()
-        {
-            // create a new object to hold the result of the map generation
-            MapGenerationOutput output = new MapGenerationOutput();
-            output.map = new float[generationInput.mapverts, generationInput.mapverts];
-            output.callback = _callback;
-            output.mean = 0;
-            output.attributes = new bool[3];
-
-            // init the min and max values so we can remap later
-            output.max = float.MinValue;
-            output.min = float.MaxValue;
-            output.maxpos = Vector2.negativeInfinity;
-            output.minpos = Vector2.negativeInfinity;
-
-            // convert these to ints now so we dont have to do it every loop
-            // int xoffset = generationInput.offset.x;
-            // int zoffset = generationInput.offset.y;
-
-            // create vertices
-            for (int x = 0; x < generationInput.mapverts; ++x)
-            {
-                for (int z = 0; z < generationInput.mapverts; ++z)
-                {
-                    float y = Biome.AccumulateBiomes01(x, z, generationInput.offset, generationInput.biomes, generationInput.maxHeight);
-                    // float y = Noise.SampleOctavePerlinNoise(x, z, generationInput.mapsquares, xoffset, zoffset, generationInput.chunkSize, octaveData);
-
-                    if (y < output.min)
-                    {
-                        output.min = y;
-                        output.minpos.x = x;
-                        output.minpos.y = z;
-                    }
-
-                    if (y > output.max)
-                    {
-                        output.max = y;
-                        output.maxpos.x = x;
-                        output.maxpos.y = z;
-                    }
-
-                    output.mean += y;
-                    
-                    output.map[x, z] = y;
-                }
-            }
-
-            output.mean /= output.map.Length;
-            float sqrdDiffSum = 0;
-            
-            // second pass, calculate the variance given the median
-            for (int x = 0; x < generationInput.mapverts; ++x)
-            {
-                for (int z = 0; z < generationInput.mapverts; ++z)
-                {
-                    float diff = output.map[x, z] - output.mean;
-                    sqrdDiffSum += diff * diff;
-                }
-            }
-
-            output.variance = sqrdDiffSum / (output.map.Length - 1);
-            output.stdDev = Mathf.Sqrt(output.variance);
-
-            if (generationInput.attributes[(int)TerrainAttributes.HAS_LAKE] && output.variance < TerrainInfo.PLakeVarianceThreshold)
-            {
-                output.attributes[(int)TerrainAttributes.HAS_LAKE] = true;
-            }
-
-            // put the result in the locked queue so that whoever needs it can access it
-            lock (_resultQ)
-            {
-                _resultQ.Enqueue(output);   
-            }
-        }
-    }
-
+    
     public struct TerrainMapIJob : IJob
     {
         // public MapGenerationInput generationInput;
